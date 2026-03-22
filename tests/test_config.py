@@ -117,7 +117,7 @@ def test_climate_ranking_defaults_are_present():
     config = Settings(_env_file=None)
 
     assert config.CLIMATE_LOOKBACK_DAYS == 30
-    assert config.HEAT_DAY_THRESHOLD == 35.0
+    assert config.HEAT_DAY_THRESHOLD == 30.0
     assert config.AGRONOMIC_SCORE_WEIGHT == 0.65
     assert config.CLIMATE_SCORE_WEIGHT == 0.35
 

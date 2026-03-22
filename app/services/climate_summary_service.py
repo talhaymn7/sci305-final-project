@@ -265,14 +265,18 @@ class ClimateSummaryService:
             field_id=field_id,
             avg_avg_temp=_round_optional(row.get("avg_temp")),
             avg_temp=_round_optional(row.get("avg_temp")),
+            min_temp_avg=_round_optional(row.get("avg_min_temp")),
             avg_min_temp=_round_optional(row.get("avg_min_temp")),
+            max_temp_avg=_round_optional(row.get("avg_max_temp")),
             avg_max_temp=_round_optional(row.get("avg_max_temp")),
             min_observed_temp=_round_optional(row.get("min_observed_temp")),
             max_observed_temp=_round_optional(row.get("max_observed_temp")),
             total_rainfall_mm=_round_optional(row.get("total_rainfall")),
             total_rainfall=_round_optional(row.get("total_rainfall")),
             avg_humidity=_round_optional(row.get("avg_humidity")),
+            avg_wind=_round_optional(row.get("avg_wind_speed")),
             avg_wind_speed=_round_optional(row.get("avg_wind_speed")),
+            avg_solar=_round_optional(row.get("avg_solar_radiation")),
             avg_solar_radiation=_round_optional(row.get("avg_solar_radiation")),
             total_et0=_round_optional(row.get("total_et0")),
             frost_days_count=int(row.get("frost_days") or 0),
@@ -280,6 +284,7 @@ class ClimateSummaryService:
             heat_days_count=int(row.get("heat_days") or 0),
             heat_days=int(row.get("heat_days") or 0),
             weather_record_count=observation_days_count,
+            observation_days=observation_days_count,
             observation_days_count=observation_days_count,
             missing_days_count=max(lookback_days - observation_days_count, 0),
             lookback_days=lookback_days,
@@ -292,3 +297,35 @@ class ClimateSummaryService:
                 else None
             ),
         )
+
+
+def get_climate_summary(
+    db: Session,
+    field_id: int | str | UUID,
+    days: int = 30,
+    *,
+    heat_threshold_c: float | None = None,
+) -> ClimateSummary | None:
+    """Return one field-scoped climate summary using SQL aggregation."""
+
+    return ClimateSummaryService(db).get_field_summary(
+        field_id,
+        days=days,
+        heat_threshold_c=heat_threshold_c,
+    )
+
+
+def get_climate_summaries(
+    db: Session,
+    field_ids: Iterable[int | str | UUID],
+    days: int = 30,
+    *,
+    heat_threshold_c: float | None = None,
+) -> dict[int | str | UUID, ClimateSummary | None]:
+    """Return multiple field-scoped climate summaries using shared SQL aggregation."""
+
+    return ClimateSummaryService(db).get_field_summaries(
+        field_ids,
+        days=days,
+        heat_threshold_c=heat_threshold_c,
+    )

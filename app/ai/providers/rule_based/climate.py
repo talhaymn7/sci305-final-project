@@ -8,6 +8,7 @@ from app.engines.climate_scoring import (
     assess_climate_compatibility,
     assess_climate_input,
     assess_climate_requirements,
+    compute_climate_score,
     score_climate_compatibility,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "assess_climate_compatibility",
     "assess_climate_input",
     "assess_climate_requirements",
+    "compute_climate_score",
     "score_climate_compatibility",
 ]

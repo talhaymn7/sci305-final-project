@@ -105,7 +105,7 @@ def test_get_climate_summary_computes_expected_metrics(db):
     assert summary.avg_temp == 16.0
     assert summary.total_rainfall == 12.5
     assert summary.frost_days == 1
-    assert summary.heat_days == 1
+    assert summary.heat_days == 2
 
 
 def test_get_climate_summary_exposes_extended_window_metrics(db):
@@ -146,7 +146,7 @@ def test_get_climate_summary_exposes_extended_window_metrics(db):
     assert summary.total_et0 == 6.0
     assert summary.observation_days_count == 2
     assert summary.missing_days_count == 5
-    assert summary.heat_threshold_c == 35.0
+    assert summary.heat_threshold_c == 30.0
     assert summary.coverage_ratio == 0.2857
 
 

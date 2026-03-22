@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     NASA_POWER_MAX_WINDOW_SHIFTS: int = 18
     NASA_POWER_TIME_STANDARD: str = "UTC"
     CLIMATE_LOOKBACK_DAYS: int = 30
-    HEAT_DAY_THRESHOLD: float = 35.0
+    HEAT_DAY_THRESHOLD: float = 30.0
     CLIMATE_SCORE_WEIGHT: float = 0.35
     AGRONOMIC_SCORE_WEIGHT: float = 0.65
     ECONOMIC_SCORE_WEIGHT: float = 0.3

@@ -76,6 +76,12 @@ class ClimateAssessment:
     risks: list[str] = field(default_factory=list)
     factors: dict[str, ClimateFactorAssessment] = field(default_factory=dict)
 
+    @property
+    def score(self) -> float | None:
+        """Compatibility alias for the normalized climate score."""
+
+        return self.climate_score
+
 
 def _clamp_ratio(value: float) -> float:
     return max(0.0, min(value, 1.0))
@@ -649,6 +655,30 @@ def score_climate_compatibility(
     return assess_climate_compatibility(crop, climate_summary, config=config).component
 
 
+def compute_climate_score(
+    field_summary: ClimateSummary | ClimateFeatures | None,
+    crop_profile,
+    config: SuitabilityScoringConfig | None = None,
+) -> ClimateAssessment:
+    """Return the normalized climate score assessment for one field and crop."""
+
+    if isinstance(field_summary, ClimateFeatures):
+        return assess_climate_input(
+            ClimateScoringInput(
+                climate_features=field_summary,
+                crop_requirements=resolve_crop_climate_requirements(crop_profile),
+            ),
+            config=config,
+        )
+    return assess_climate_input(
+        ClimateScoringInput(
+            climate_summary=field_summary,
+            crop_requirements=resolve_crop_climate_requirements(crop_profile),
+        ),
+        config=config,
+    )
+
+
 __all__ = [
     "ClimateAssessment",
     "ClimateFactorAssessment",
@@ -657,5 +687,6 @@ __all__ = [
     "assess_climate_compatibility",
     "assess_climate_input",
     "assess_climate_requirements",
+    "compute_climate_score",
     "score_climate_compatibility",
 ]

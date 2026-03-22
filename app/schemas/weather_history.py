@@ -82,14 +82,18 @@ class ClimateSummary(BaseModel):
     field_id: int | str | UUID | None = None
     avg_avg_temp: float | None = None
     avg_temp: float | None = None
+    min_temp_avg: float | None = None
     avg_min_temp: float | None = None
+    max_temp_avg: float | None = None
     avg_max_temp: float | None = None
     min_observed_temp: float | None = None
     max_observed_temp: float | None = None
     total_rainfall_mm: float | None = None
     total_rainfall: float | None = None
     avg_humidity: float | None = None
+    avg_wind: float | None = None
     avg_wind_speed: float | None = None
+    avg_solar: float | None = None
     avg_solar_radiation: float | None = None
     total_et0: float | None = Field(default=None, ge=0)
     frost_days_count: int = 0
@@ -97,6 +101,7 @@ class ClimateSummary(BaseModel):
     heat_days_count: int = 0
     heat_days: int = 0
     weather_record_count: int = 0
+    observation_days: int = 0
     observation_days_count: int = 0
     missing_days_count: int | None = Field(default=None, ge=0)
     lookback_days: int | None = None
@@ -113,10 +118,26 @@ class ClimateSummary(BaseModel):
             self.avg_avg_temp = self.avg_temp
         if self.avg_temp is None and self.avg_avg_temp is not None:
             self.avg_temp = self.avg_avg_temp
+        if self.min_temp_avg is None and self.avg_min_temp is not None:
+            self.min_temp_avg = self.avg_min_temp
+        if self.avg_min_temp is None and self.min_temp_avg is not None:
+            self.avg_min_temp = self.min_temp_avg
+        if self.max_temp_avg is None and self.avg_max_temp is not None:
+            self.max_temp_avg = self.avg_max_temp
+        if self.avg_max_temp is None and self.max_temp_avg is not None:
+            self.avg_max_temp = self.max_temp_avg
         if self.total_rainfall_mm is None and self.total_rainfall is not None:
             self.total_rainfall_mm = self.total_rainfall
         if self.total_rainfall is None and self.total_rainfall_mm is not None:
             self.total_rainfall = self.total_rainfall_mm
+        if self.avg_wind is None and self.avg_wind_speed is not None:
+            self.avg_wind = self.avg_wind_speed
+        if self.avg_wind_speed is None and self.avg_wind is not None:
+            self.avg_wind_speed = self.avg_wind
+        if self.avg_solar is None and self.avg_solar_radiation is not None:
+            self.avg_solar = self.avg_solar_radiation
+        if self.avg_solar_radiation is None and self.avg_solar is not None:
+            self.avg_solar_radiation = self.avg_solar
         if self.frost_days_count <= 0 and self.frost_days > 0:
             self.frost_days_count = self.frost_days
         if self.frost_days <= 0 and self.frost_days_count > 0:
@@ -125,10 +146,16 @@ class ClimateSummary(BaseModel):
             self.heat_days_count = self.heat_days
         if self.heat_days <= 0 and self.heat_days_count > 0:
             self.heat_days = self.heat_days_count
+        if self.observation_days <= 0 and self.observation_days_count > 0:
+            self.observation_days = self.observation_days_count
+        if self.observation_days_count <= 0 and self.observation_days > 0:
+            self.observation_days_count = self.observation_days
         if self.observation_days_count <= 0 and self.weather_record_count > 0:
             self.observation_days_count = self.weather_record_count
         if self.weather_record_count <= 0 and self.observation_days_count > 0:
             self.weather_record_count = self.observation_days_count
+        if self.observation_days <= 0 and self.weather_record_count > 0:
+            self.observation_days = self.weather_record_count
         if self.lookback_days is not None and self.missing_days_count is None:
             self.missing_days_count = max(self.lookback_days - self.observation_days_count, 0)
         if self.lookback_days and self.coverage_ratio is None:

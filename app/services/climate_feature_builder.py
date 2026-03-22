@@ -325,3 +325,37 @@ def _excess_days(observed_days: int | None, tolerance_days: int | None) -> int |
     if observed_days is None or tolerance_days is None:
         return None
     return max(observed_days - tolerance_days, 0)
+
+
+def build_climate_summary(
+    db: Session,
+    field_id: int | str | UUID,
+    *,
+    days: int = 30,
+    heat_threshold_c: float | None = None,
+) -> ClimateSummary | None:
+    """Build a persisted climate summary for one field."""
+
+    return ClimateFeatureBuilder(db).build_climate_summary(
+        field_id,
+        days=days,
+        heat_threshold_c=heat_threshold_c,
+    )
+
+
+def build_climate_features(
+    db: Session,
+    field_id: int | str | UUID,
+    crop_id: int | str | UUID,
+    *,
+    days: int = 30,
+    heat_threshold_c: float | None = None,
+) -> ClimateFeatures:
+    """Build normalized climate features for one field and crop."""
+
+    return ClimateFeatureBuilder(db).build_climate_features(
+        field_id,
+        crop_id,
+        days=days,
+        heat_threshold_c=heat_threshold_c,
+    )
