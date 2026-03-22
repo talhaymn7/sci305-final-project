@@ -4,7 +4,8 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import MetaData, create_engine, inspect, text
+from alembic.script import ScriptDirectory
+from sqlalchemy import Column, Date, DateTime, Float, MetaData, String, Table, create_engine, inspect, text
 
 from app.ingestion.clients.base import IngestionClient
 from app.ingestion.runners.job_runner import IngestionJobRunner
@@ -328,3 +329,59 @@ def test_ingestion_foundation_migration_upgrade_and_downgrade(tmp_path):
     assert "data_sources" not in downgraded_tables
     assert "ingestion_runs" not in downgraded_tables
     assert "raw_ingestion_payloads" not in downgraded_tables
+
+
+def test_alembic_upgrade_head_bootstraps_unversioned_legacy_schema(tmp_path):
+    database_path = tmp_path / "legacy_bootstrap.sqlite"
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    engine = create_engine(database_url)
+    metadata = MetaData()
+    Table(
+        "fields",
+        metadata,
+        Column("id", String(36), primary_key=True),
+        Column("name", String(255), nullable=False),
+        Column("latitude", Float, nullable=True),
+        Column("longitude", Float, nullable=True),
+    )
+    Table(
+        "soil_tests",
+        metadata,
+        Column("id", String(36), primary_key=True),
+        Column("field_id", String(36), nullable=False),
+        Column("sample_date", Date, nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+    )
+    Table(
+        "crop_profiles",
+        metadata,
+        Column("id", String(36), primary_key=True),
+        Column("crop_name", String(255), nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        Column("updated_at", DateTime(timezone=True), nullable=False),
+    )
+    Table(
+        "weather_history",
+        metadata,
+        Column("id", String(36), primary_key=True),
+        Column("field_id", String(36), nullable=False),
+        Column("weather_date", Date, nullable=False),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+    )
+    metadata.create_all(engine)
+
+    config = _make_alembic_config(database_url)
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    assert "alembic_version" in tables
+    assert "data_sources" in tables
+    assert "ingestion_runs" in tables
+    assert "raw_ingestion_payloads" in tables
+
+    expected_head = ScriptDirectory.from_config(config).get_current_head()
+    with engine.connect() as connection:
+        version_num = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+
+    assert version_num == expected_head

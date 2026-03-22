@@ -4,6 +4,7 @@ from app.ai.contracts.assistant import AssistantAnswerProvider, LLMAnswer
 from app.ai.contracts.metadata import AITraceMetadata
 from app.ai.contracts.explanation import (
     ExplanationBlocker,
+    ExplanationClimateMetadata,
     ExplanationEconomicMetadata,
     ExplanationInput,
     ExplanationOutput,
@@ -60,6 +61,7 @@ __all__ = [
     "AssistantAnswerProvider",
     "AITraceMetadata",
     "ExplanationBlocker",
+    "ExplanationClimateMetadata",
     "ExplanationEconomicMetadata",
     "ExplanationInput",
     "ExplanationOutput",

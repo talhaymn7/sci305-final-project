@@ -328,4 +328,5 @@ def test_ranking_service_fallback_uses_weather_history_climate_signals():
         assert [entry.field_id for entry in response.ranked_results] == ["field-1", "field-2"]
         assert response.ranked_results[0].climate_score is not None
         assert response.ranked_results[0].climate_strengths
+        assert isinstance(response.ranked_results[0].climate_warnings, list)
         assert response.ranked_results[1].climate_risks

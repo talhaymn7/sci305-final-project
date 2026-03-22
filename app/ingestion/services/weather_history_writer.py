@@ -6,21 +6,41 @@ from collections.abc import Sequence
 from datetime import date
 import logging
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import insert, select
+from sqlalchemy import Column, Date, DateTime, Float, MetaData, String, Table, Uuid, insert, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.db.reflection import reflect_tables
+from app.db.reflection import table_has_columns
 from app.ingestion.deduplication import WeatherHistoryDuplicateStrategy, collect_existing_keys, deduplicate_prepared_rows
 from app.ingestion.services.pipeline import NormalizedRecordWriter
 from app.ingestion.types import NormalizedRecord, PersistResult, PreparedRow
+from app.models.weather_history import WeatherHistory
 from app.models.mixins import utc_now
 from app.services.errors import ServiceValidationError
 
 
 logger = logging.getLogger(__name__)
+
+
+LEGACY_WEATHER_HISTORY_METADATA = MetaData()
+LEGACY_WEATHER_HISTORY_TABLE = Table(
+    "weather_history",
+    LEGACY_WEATHER_HISTORY_METADATA,
+    Column("id", Uuid(as_uuid=True), primary_key=True, nullable=False),
+    Column("field_id", Uuid(as_uuid=True), nullable=True),
+    Column("weather_date", Date, nullable=False),
+    Column("min_temp", Float, nullable=True),
+    Column("max_temp", Float, nullable=True),
+    Column("avg_temp", Float, nullable=True),
+    Column("rainfall_mm", Float, nullable=True),
+    Column("humidity", Float, nullable=True),
+    Column("wind_speed", Float, nullable=True),
+    Column("solar_radiation", Float, nullable=True),
+    Column("et0", Float, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
 
 
 class WeatherHistoryIngestionWriter(NormalizedRecordWriter):
@@ -34,7 +54,7 @@ class WeatherHistoryIngestionWriter(NormalizedRecordWriter):
         data_source,
         ingestion_run,
     ) -> PersistResult:
-        """Insert non-duplicate weather rows into the reflected weather_history table."""
+        """Insert non-duplicate weather rows into the declared weather_history table."""
 
         _ = (data_source, ingestion_run)
         if not records:
@@ -45,8 +65,7 @@ class WeatherHistoryIngestionWriter(NormalizedRecordWriter):
                 metadata_json={"target_table": "weather_history", "duplicate_count": 0},
             )
 
-        weather_history_table = reflect_tables(db, "weather_history")["weather_history"]
-        date_column_name = "date" if "date" in weather_history_table.c else "weather_date"
+        weather_history_table, date_column_name = self._resolve_target_table(db)
         duplicate_strategy = WeatherHistoryDuplicateStrategy(date_column_name=date_column_name)
 
         prepared_rows = [
@@ -98,9 +117,15 @@ class WeatherHistoryIngestionWriter(NormalizedRecordWriter):
             },
         )
 
+    @staticmethod
+    def _resolve_target_table(db: Session) -> tuple[Table, str]:
+        if table_has_columns(db, "weather_history", "weather_date"):
+            return LEGACY_WEATHER_HISTORY_TABLE, "weather_date"
+        return WeatherHistory.__table__, "date"
+
     def _build_insert_row(
         self,
-        weather_history_table,
+        weather_history_table: Table,
         record: NormalizedRecord,
         *,
         date_column_name: str,
@@ -121,6 +146,8 @@ class WeatherHistoryIngestionWriter(NormalizedRecordWriter):
             "solar_radiation": self._coerce_optional_float(record.values.get("solar_radiation")),
             "et0": self._coerce_optional_float(record.values.get("et0")),
         }
+        if "id" in weather_history_table.c and date_column_name == "weather_date":
+            row["id"] = uuid4()
         if "created_at" in weather_history_table.c:
             row["created_at"] = utc_now()
         return row

@@ -38,6 +38,11 @@ class _SupportsExplanationFeatureAssembly(Protocol):
     breakdown: dict[str, ScoreComponent]
     blockers: list[ScoreBlocker]
     reasons: list[str]
+    climate_reasons: list[str]
+    climate_warnings: list[str]
+    climate_strengths: list[str]
+    climate_weaknesses: list[str]
+    climate_risks: list[str]
     economic_strengths: list[str]
     economic_weaknesses: list[str]
     economic_risks: list[str]
@@ -80,6 +85,11 @@ def build_explanation_input(
             blockers=ranked_result.blockers,
             reasons=ranked_result.reasons,
             penalties=ranked_result.result.penalties,
+            climate_reasons=list(getattr(ranked_result, "climate_reasons", [])),
+            climate_warnings=list(getattr(ranked_result, "climate_warnings", [])),
+            climate_strengths=list(getattr(ranked_result, "climate_strengths", [])),
+            climate_weaknesses=list(getattr(ranked_result, "climate_weaknesses", [])),
+            climate_risks=list(getattr(ranked_result, "climate_risks", [])),
             economic_strengths=strengths,
             economic_weaknesses=weaknesses,
             economic_risks=risks,

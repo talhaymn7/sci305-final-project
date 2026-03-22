@@ -46,6 +46,11 @@ class _SupportsRankedExplanation(Protocol):
     breakdown: dict[str, ScoreComponent]
     blockers: list[ScoreBlocker]
     reasons: list[str]
+    climate_reasons: list[str]
+    climate_warnings: list[str]
+    climate_strengths: list[str]
+    climate_weaknesses: list[str]
+    climate_risks: list[str]
     economic_strengths: list[str]
     economic_weaknesses: list[str]
     result: SuitabilityResult
@@ -61,6 +66,10 @@ class _ExplanationContext:
     penalties: list[ExplanationPenalty]
     blockers: list[ExplanationBlocker]
     reasons: list[str]
+    climate_reasons: list[str]
+    climate_strengths: list[str]
+    climate_weaknesses: list[str]
+    climate_risks: list[str]
     economic_strengths: list[str]
     economic_weaknesses: list[str]
     precomputed_risks: list[str]
@@ -135,18 +144,23 @@ def _suitability_label(total_score: float, blockers: list[ExplanationBlocker]) -
 
 def _collect_strengths(
     breakdown: dict[str, ExplanationScoreComponent],
+    climate_strengths: list[str],
     economic_strengths: list[str],
 ) -> list[str]:
     strengths: list[str] = []
     for _, component in _ordered_components(breakdown):
+        if component.key == "climate_compatibility":
+            continue
         if component.status == ScoreStatus.IDEAL.value:
             strengths.extend(component.reasons)
+    strengths = [*_normalize_climate_messages(climate_strengths), *strengths]
     strengths.extend(economic_strengths)
     return _dedupe_messages(strengths)
 
 
 def _collect_weaknesses(
     penalties: list[ExplanationPenalty],
+    climate_weaknesses: list[str],
     economic_weaknesses: list[str],
 ) -> list[str]:
     ordered_penalties = sorted(
@@ -156,9 +170,45 @@ def _collect_weaknesses(
             COMPONENT_ORDER_INDEX.get(penalty.dimension, len(COMPONENT_ORDER_INDEX)),
         ),
     )
-    weaknesses = [penalty.message for penalty in ordered_penalties]
+    weaknesses = _normalize_climate_messages(climate_weaknesses)
+    weaknesses.extend(
+        penalty.message
+        for penalty in ordered_penalties
+        if penalty.dimension != "climate_compatibility"
+    )
     weaknesses.extend(economic_weaknesses)
     return _dedupe_messages(weaknesses)
+
+
+def _normalize_climate_messages(messages: list[str]) -> list[str]:
+    return _dedupe_messages([_normalize_climate_message(message) for message in messages])
+
+
+def _normalize_climate_message(message: str) -> str:
+    normalized = message.strip()
+    lookup = {
+        "Temperature within optimal range.": "Average temperature is within the crop's ideal range.",
+        "Recent temperatures stayed within the crop's preferred range.": "Average temperature is within the crop's ideal range.",
+        "Recent temperatures were cooler than the crop's preferred range.": "Average temperature is below the crop's ideal range.",
+        "Recent temperatures were warmer than the crop's preferred range.": "Average temperature is above the crop's ideal range.",
+        "Recent temperatures fell outside the crop's tolerable range.": "Average temperature is outside the crop's tolerable range.",
+        "Rainfall over the lookback period stayed within the crop's preferred range.": "Recent rainfall is within the crop's preferred range.",
+        "Rainfall over the lookback period was below the crop's preferred range.": "Recent rainfall is below the crop's preferred threshold.",
+        "Rainfall over the lookback period was materially below the crop's preferred range.": "Recent rainfall is below the crop's preferred threshold.",
+        "Rainfall over the lookback period was above the crop's preferred range.": "Recent rainfall is above the crop's preferred threshold.",
+        "Rainfall over the lookback period was materially above the crop's preferred range.": "Recent rainfall is above the crop's preferred threshold.",
+        "Rainfall insufficient.": "Recent rainfall is below the crop's preferred threshold.",
+        "Recent frost exposure stayed within the crop's tolerance.": "Recent frost exposure is within the crop's tolerance.",
+        "Elevated frost risk was observed in the recent climate window.": "Frost risk is elevated in the recent climate window.",
+        "High frost risk detected.": "Frost risk is elevated in the recent climate window.",
+        "Recent heat stress stayed within the crop's tolerance.": "Recent heat exposure is within the crop's tolerance.",
+        "Elevated heat stress was observed in the recent climate window.": "Recent heat stress reduces suitability.",
+        "High heat risk detected.": "Recent heat stress reduces suitability.",
+        "Recent climate summary is unavailable; climate scoring used a conservative fallback.": "Recent climate summary is unavailable for deterministic scoring.",
+        "Recent climate summary is unavailable for this field.": "Recent climate summary is unavailable for deterministic scoring.",
+        "Climate observations were incomplete for the recent scoring window.": "Recent climate observations are incomplete for deterministic scoring.",
+    }
+    return lookup.get(normalized, normalized)
 
 
 def _collect_additional_reasons(
@@ -176,6 +226,9 @@ def _build_short_explanation(
     strengths: list[str],
     weaknesses: list[str],
     risks: list[str],
+    climate_strengths: list[str],
+    climate_weaknesses: list[str],
+    climate_risks: list[str],
     reasons: list[str],
     blockers: list[ExplanationBlocker],
 ) -> str:
@@ -192,9 +245,20 @@ def _build_short_explanation(
         ),
         None,
     )
+    normalized_climate_strengths = _normalize_climate_messages(climate_strengths)
+    normalized_climate_weaknesses = _normalize_climate_messages(climate_weaknesses)
+    normalized_climate_risks = _normalize_climate_messages(climate_risks)
 
+    if blockers and normalized_climate_risks:
+        return _as_sentence(f"This field is {label} because {_join_clauses(normalized_climate_risks[:2])}")
     if blockers and risks:
         return _as_sentence(f"This field is {label} because {_join_clauses(risks[:2])}")
+    if display_score >= 80 and normalized_climate_strengths:
+        return _as_sentence(f"This field ranked highly because {_join_clauses(normalized_climate_strengths[:2])}")
+    if normalized_climate_weaknesses and display_score < 80:
+        return _as_sentence(f"This field lost points because {_join_clauses(normalized_climate_weaknesses[:2])}")
+    if normalized_climate_risks and display_score < 70:
+        return _as_sentence(f"This field faces material risks because {_join_clauses(normalized_climate_risks[:2])}")
     if display_score >= 80 and economic_strength:
         return _as_sentence(economic_strength)
     if economic_weakness and display_score < 70:
@@ -224,6 +288,9 @@ def _build_detailed_explanation(
     strengths: list[str],
     weaknesses: list[str],
     risks: list[str],
+    climate_strengths: list[str],
+    climate_weaknesses: list[str],
+    climate_risks: list[str],
     additional_reasons: list[str],
     blockers: list[ExplanationBlocker],
 ) -> str:
@@ -233,12 +300,18 @@ def _build_detailed_explanation(
             f"Field '{field_name}' is {label} based on the current scoring results (score: {display_score:.1f}/100)"
         )
     ]
+    climate_messages = _normalize_climate_messages(
+        [*climate_strengths, *climate_weaknesses, *climate_risks]
+    )
 
     if blockers:
         blocker_messages = _dedupe_messages([blocker.message for blocker in blockers])
         sentences.append(_as_sentence("Blockers: " + "; ".join(blocker_messages[:3])))
     elif strengths:
         sentences.append(_as_sentence("Strengths: " + "; ".join(strengths[:3])))
+
+    if climate_messages:
+        sentences.append(_as_sentence("Climate: " + "; ".join(climate_messages[:3])))
 
     if weaknesses:
         sentences.append(_as_sentence("Weaknesses: " + "; ".join(weaknesses[:3])))
@@ -321,6 +394,31 @@ class RuleBasedExplanationProvider(ExplanationProvider):
             penalties=request.penalties,
             blockers=request.blockers,
             reasons=request.reasons,
+            climate_reasons=(
+                _normalize_climate_messages(request.climate_metadata.reasons)
+                if request.climate_metadata is not None
+                else []
+            ),
+            climate_strengths=(
+                _normalize_climate_messages(request.climate_metadata.strengths)
+                if request.climate_metadata is not None
+                else []
+            ),
+            climate_weaknesses=(
+                _normalize_climate_messages(request.climate_metadata.weaknesses)
+                if request.climate_metadata is not None
+                else []
+            ),
+            climate_risks=(
+                _normalize_climate_messages(
+                    [
+                        *request.climate_metadata.warnings,
+                        *request.climate_metadata.risks,
+                    ]
+                )
+                if request.climate_metadata is not None
+                else []
+            ),
             economic_strengths=(
                 list(request.economic_metadata.strengths)
                 if request.economic_metadata is not None
@@ -333,6 +431,16 @@ class RuleBasedExplanationProvider(ExplanationProvider):
             ),
             precomputed_risks=(
                 [
+                    *(
+                        _normalize_climate_messages(
+                            [
+                                *request.climate_metadata.warnings,
+                                *request.climate_metadata.risks,
+                            ]
+                        )
+                        if request.climate_metadata is not None
+                        else []
+                    ),
                     *(list(request.risk_metadata.risks) if request.risk_metadata is not None else []),
                     *(
                         list(request.economic_metadata.risks)
@@ -343,8 +451,16 @@ class RuleBasedExplanationProvider(ExplanationProvider):
             ),
         )
 
-        strengths = _collect_strengths(context.breakdown, context.economic_strengths)
-        weaknesses = _collect_weaknesses(context.penalties, context.economic_weaknesses)
+        strengths = _collect_strengths(
+            context.breakdown,
+            context.climate_strengths,
+            context.economic_strengths,
+        )
+        weaknesses = _collect_weaknesses(
+            context.penalties,
+            context.climate_weaknesses,
+            context.economic_weaknesses,
+        )
         risk_assessment = self.risk_provider.score(
             RiskScoringRequest(
                 breakdown={
@@ -373,6 +489,9 @@ class RuleBasedExplanationProvider(ExplanationProvider):
                 strengths,
                 weaknesses,
                 risks,
+                context.climate_strengths,
+                context.climate_weaknesses,
+                context.climate_risks,
                 context.reasons,
                 context.blockers,
             ),
@@ -382,6 +501,9 @@ class RuleBasedExplanationProvider(ExplanationProvider):
                 strengths,
                 weaknesses,
                 risks,
+                context.climate_strengths,
+                context.climate_weaknesses,
+                context.climate_risks,
                 additional_reasons,
                 context.blockers,
             ),
@@ -397,6 +519,7 @@ class RuleBasedExplanationProvider(ExplanationProvider):
                 debug_info={
                     "blocker_count": len(context.blockers),
                     "component_count": len(context.breakdown),
+                    "climate_reason_count": len(context.climate_reasons),
                     "risk_count": len(risks),
                     "risk_provider_metadata": {
                         "provider_name": risk_assessment.provider_name,
@@ -431,6 +554,11 @@ class RuleBasedExplanationProvider(ExplanationProvider):
                 blockers=ranked_result.blockers,
                 reasons=ranked_result.reasons,
                 penalties=ranked_result.result.penalties,
+                climate_reasons=getattr(ranked_result, "climate_reasons", []),
+                climate_warnings=getattr(ranked_result, "climate_warnings", []),
+                climate_strengths=getattr(ranked_result, "climate_strengths", []),
+                climate_weaknesses=getattr(ranked_result, "climate_weaknesses", []),
+                climate_risks=getattr(ranked_result, "climate_risks", []),
                 economic_strengths=getattr(ranked_result, "economic_strengths", []),
                 economic_weaknesses=getattr(ranked_result, "economic_weaknesses", []),
                 field_id=getattr(ranked_result, "field_id", None),

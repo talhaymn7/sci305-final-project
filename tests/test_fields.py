@@ -84,6 +84,47 @@ def test_get_field_climate_summary(client, db, created_field):
     assert payload["missing_days_count"] == 5
 
 
+def test_get_field_climate_summary_accepts_heat_threshold_override(client, db, created_field):
+    db.add_all(
+        [
+            WeatherHistory(
+                field_id=created_field["id"],
+                date=date(2026, 3, 2),
+                min_temp=12.0,
+                max_temp=34.0,
+                avg_temp=22.0,
+                rainfall_mm=1.0,
+                humidity=58.0,
+                wind_speed=4.0,
+                solar_radiation=16.0,
+                et0=2.5,
+            ),
+            WeatherHistory(
+                field_id=created_field["id"],
+                date=date(2026, 3, 3),
+                min_temp=13.0,
+                max_temp=36.0,
+                avg_temp=24.0,
+                rainfall_mm=0.0,
+                humidity=54.0,
+                wind_speed=4.5,
+                solar_radiation=17.0,
+                et0=2.8,
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.get(
+        f"/api/v1/fields/{created_field['id']}/climate-summary?days=7&heat_threshold_c=33"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["heat_threshold_c"] == 33.0
+    assert payload["heat_days"] == 2
+
+
 def test_update_field(client, created_field):
     """Test that a field's name can be updated via the PUT endpoint."""
     field_id = created_field["id"]

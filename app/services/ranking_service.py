@@ -505,6 +505,7 @@ def _serialize_ranked_result(
         weaknesses=explanation_output.weaknesses,
         risks=explanation_output.risks,
         climate_reasons=entry.climate_reasons,
+        climate_warnings=entry.climate_warnings,
         climate_strengths=entry.climate_strengths,
         climate_weaknesses=entry.climate_weaknesses,
         climate_risks=entry.climate_risks,

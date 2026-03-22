@@ -94,6 +94,7 @@ class RankedFieldRecommendation(BaseModel):
     weaknesses: list[str]
     risks: list[str]
     climate_reasons: list[str] = Field(default_factory=list)
+    climate_warnings: list[str] = Field(default_factory=list)
     climate_strengths: list[str] = Field(default_factory=list)
     climate_weaknesses: list[str] = Field(default_factory=list)
     climate_risks: list[str] = Field(default_factory=list)

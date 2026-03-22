@@ -4,6 +4,8 @@ from datetime import date
 from uuid import uuid4
 
 import httpx
+from sqlalchemy import Column, Date, DateTime, Float, MetaData, String, Table, Uuid, UniqueConstraint, create_engine, select
+from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
 from app.ingestion.clients.nasa_power import NASAPowerAPIClient, NASAPowerFetchResult
@@ -326,6 +328,169 @@ def test_weather_history_writer_skips_existing_and_in_batch_duplicates(db):
     assert result.skipped_records[0].stage == "deduplication"
     assert result.metadata_json["date_column"] == "date"
     assert db.query(WeatherHistory).count() == 2
+
+
+def test_weather_history_writer_supports_weather_date_schema_without_reflection():
+    engine = create_engine("sqlite:///:memory:")
+    metadata = MetaData()
+    weather_history_table = Table(
+        "weather_history",
+        metadata,
+        Column("id", Uuid(as_uuid=True), primary_key=True, nullable=False),
+        Column("field_id", Uuid(as_uuid=True), nullable=True),
+        Column("weather_date", Date, nullable=False),
+        Column("min_temp", Float, nullable=True),
+        Column("max_temp", Float, nullable=True),
+        Column("avg_temp", Float, nullable=True),
+        Column("rainfall_mm", Float, nullable=True),
+        Column("humidity", Float, nullable=True),
+        Column("wind_speed", Float, nullable=True),
+        Column("solar_radiation", Float, nullable=True),
+        Column("et0", Float, nullable=True),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        UniqueConstraint("field_id", "weather_date", name="weather_field_date_unique"),
+    )
+    metadata.create_all(engine)
+    SessionTesting = sessionmaker(bind=engine)
+    field_id = uuid4()
+    data_source, ingestion_run = _build_runtime_records()
+
+    with SessionTesting() as session:
+        writer = WeatherHistoryIngestionWriter()
+        first_result = writer.write(
+            session,
+            [
+                NormalizedRecord(
+                    record_type="weather_history",
+                    source_identifier=f"{field_id}:2025-01-01",
+                    values={
+                        "field_id": str(field_id),
+                        "weather_date": date(2025, 1, 1),
+                        "min_temp": 9.0,
+                        "max_temp": 19.0,
+                        "avg_temp": 14.0,
+                        "rainfall_mm": 0.5,
+                        "humidity": 60.0,
+                        "wind_speed": 4.0,
+                        "solar_radiation": 11.0,
+                    },
+                    payload_type=IngestionPayloadType.JSON,
+                )
+            ],
+            data_source=data_source,
+            ingestion_run=ingestion_run,
+        )
+        second_result = writer.write(
+            session,
+            [
+                NormalizedRecord(
+                    record_type="weather_history",
+                    source_identifier=f"{field_id}:2025-01-01:dup",
+                    values={
+                        "field_id": str(field_id),
+                        "weather_date": date(2025, 1, 1),
+                        "min_temp": 9.0,
+                        "max_temp": 19.0,
+                        "avg_temp": 14.0,
+                        "rainfall_mm": 0.5,
+                        "humidity": 60.0,
+                        "wind_speed": 4.0,
+                        "solar_radiation": 11.0,
+                    },
+                    payload_type=IngestionPayloadType.JSON,
+                )
+            ],
+            data_source=data_source,
+            ingestion_run=ingestion_run,
+        )
+        rows = session.execute(
+            select(weather_history_table).order_by(weather_history_table.c.weather_date.asc())
+        ).mappings().all()
+
+    assert first_result.records_inserted == 1
+    assert first_result.metadata_json["date_column"] == "weather_date"
+    assert second_result.records_inserted == 0
+    assert second_result.records_skipped == 1
+    assert len(rows) == 1
+    assert rows[0]["field_id"] == field_id
+    assert rows[0]["weather_date"] == date(2025, 1, 1)
+
+
+def test_execute_nasa_power_ingestion_writes_to_legacy_weather_history_schema():
+    engine = create_engine("sqlite:///:memory:")
+    schema_metadata = MetaData()
+    fields_table = Table(
+        "fields",
+        schema_metadata,
+        Column("id", Uuid(as_uuid=True), primary_key=True, nullable=False),
+        Column("name", String(255), nullable=False),
+        Column("latitude", Float, nullable=True),
+        Column("longitude", Float, nullable=True),
+    )
+    weather_history_table = Table(
+        "weather_history",
+        schema_metadata,
+        Column("id", Uuid(as_uuid=True), primary_key=True, nullable=False),
+        Column("field_id", Uuid(as_uuid=True), nullable=True),
+        Column("weather_date", Date, nullable=False),
+        Column("min_temp", Float, nullable=True),
+        Column("max_temp", Float, nullable=True),
+        Column("avg_temp", Float, nullable=True),
+        Column("rainfall_mm", Float, nullable=True),
+        Column("humidity", Float, nullable=True),
+        Column("wind_speed", Float, nullable=True),
+        Column("solar_radiation", Float, nullable=True),
+        Column("et0", Float, nullable=True),
+        Column("created_at", DateTime(timezone=True), nullable=False),
+        UniqueConstraint("field_id", "weather_date", name="weather_field_date_unique"),
+    )
+    schema_metadata.create_all(engine)
+    DataSource.__table__.create(bind=engine, checkfirst=True)
+    IngestionRun.__table__.create(bind=engine, checkfirst=True)
+    RawIngestionPayload.__table__.create(bind=engine, checkfirst=True)
+    SessionTesting = sessionmaker(bind=engine)
+    field_id = uuid4()
+    api_client = _StaticNASAAPIClient(_build_nasa_payload())
+
+    with SessionTesting() as session:
+        session.execute(
+            fields_table.insert().values(
+                id=field_id,
+                name="Legacy North Block",
+                latitude=39.7817,
+                longitude=-89.6501,
+            )
+        )
+        session.commit()
+
+        first_result = execute_nasa_power_ingestion(
+            session,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 2),
+            run_type=IngestionRunType.BACKFILL,
+            api_client=api_client,
+        )
+        second_result = execute_nasa_power_ingestion(
+            session,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 2),
+            run_type=IngestionRunType.BACKFILL,
+            api_client=api_client,
+        )
+
+        weather_rows = session.execute(
+            select(weather_history_table).order_by(weather_history_table.c.weather_date.asc())
+        ).mappings().all()
+
+        assert first_result.status == IngestionRunStatus.SUCCEEDED
+        assert first_result.records_inserted == 2
+        assert second_result.status == IngestionRunStatus.SUCCEEDED
+        assert second_result.records_inserted == 0
+        assert second_result.records_skipped == 2
+        assert session.query(IngestionRun).count() == 2
+        assert session.query(RawIngestionPayload).count() == 2
+        assert len(weather_rows) == 2
+        assert [row["weather_date"] for row in weather_rows] == [date(2025, 1, 1), date(2025, 1, 2)]
 
 
 def test_execute_nasa_power_ingestion_persists_run_payloads_and_weather_rows(db):

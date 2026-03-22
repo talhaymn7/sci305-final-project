@@ -348,6 +348,7 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
         "weaknesses",
         "risks",
         "climate_reasons",
+        "climate_warnings",
         "climate_strengths",
         "climate_weaknesses",
         "climate_risks",
@@ -380,6 +381,7 @@ def test_rank_fields_api_returns_wrapped_ranking_response(client, db):
     assert isinstance(payload["ranked_results"][0]["economic_score"], float)
     assert payload["ranked_results"][0]["ranking_score"] == payload["ranked_results"][0]["total_score"]
     assert isinstance(payload["ranked_results"][0]["climate_reasons"], list)
+    assert isinstance(payload["ranked_results"][0]["climate_warnings"], list)
     assert isinstance(payload["ranked_results"][0]["strengths"], list)
     assert isinstance(payload["ranked_results"][0]["metadata"]["provider_name"], str)
     assert isinstance(payload["ranked_results"][0]["provider_metadata"]["explanation_provider"]["provider_name"], str)

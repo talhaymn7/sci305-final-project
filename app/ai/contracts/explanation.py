@@ -137,6 +137,17 @@ class ExplanationEconomicMetadata:
 
 
 @dataclass(slots=True)
+class ExplanationClimateMetadata:
+    """Optional climate context surfaced in deterministic explanations."""
+
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    strengths: list[str] = field(default_factory=list)
+    weaknesses: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class ExplanationInput:
     """Canonical provider input for explanation generation."""
 
@@ -148,6 +159,7 @@ class ExplanationInput:
     yield_metadata: ExplanationYieldMetadata | None = None
     risk_metadata: ExplanationRiskMetadata | None = None
     economic_metadata: ExplanationEconomicMetadata | None = None
+    climate_metadata: ExplanationClimateMetadata | None = None
     feature_context: FeatureSummaryBundle | None = None
 
 
@@ -195,6 +207,7 @@ class SuitabilityExplanationRequest:
     yield_metadata: ExplanationYieldMetadata | None = None
     risk_metadata: ExplanationRiskMetadata | None = None
     economic_metadata: ExplanationEconomicMetadata | None = None
+    climate_metadata: ExplanationClimateMetadata | None = None
     feature_context: FeatureSummaryBundle | None = None
 
 
@@ -209,12 +222,18 @@ class RankedExplanationRequest:
     blockers: list[ScoreBlocker]
     reasons: list[str]
     penalties: list[ScorePenalty]
+    climate_reasons: list[str] = field(default_factory=list)
+    climate_warnings: list[str] = field(default_factory=list)
+    climate_strengths: list[str] = field(default_factory=list)
+    climate_weaknesses: list[str] = field(default_factory=list)
+    climate_risks: list[str] = field(default_factory=list)
     economic_strengths: list[str] = field(default_factory=list)
     economic_weaknesses: list[str] = field(default_factory=list)
     economic_risks: list[str] = field(default_factory=list)
     yield_metadata: ExplanationYieldMetadata | None = None
     risk_metadata: ExplanationRiskMetadata | None = None
     economic_metadata: ExplanationEconomicMetadata | None = None
+    climate_metadata: ExplanationClimateMetadata | None = None
     field_id: int | None = None
     crop_id: int | None = None
     crop_name: str | None = None
@@ -255,6 +274,14 @@ def build_explanation_input_from_suitability_request(
         yield_metadata=request.yield_metadata,
         risk_metadata=request.risk_metadata,
         economic_metadata=request.economic_metadata,
+        climate_metadata=_merge_climate_metadata(
+            request.climate_metadata,
+            request.result.climate_reasons,
+            request.result.climate_warnings,
+            request.result.climate_strengths,
+            request.result.climate_weaknesses,
+            request.result.climate_risks,
+        ),
         feature_context=request.feature_context,
     )
 
@@ -287,6 +314,14 @@ def build_explanation_input_from_ranked_request(
             request.economic_strengths,
             request.economic_weaknesses,
             request.economic_risks,
+        ),
+        climate_metadata=_merge_climate_metadata(
+            request.climate_metadata,
+            request.climate_reasons,
+            request.climate_warnings,
+            request.climate_strengths,
+            request.climate_weaknesses,
+            request.climate_risks,
         ),
         feature_context=request.feature_context,
     )
@@ -370,6 +405,48 @@ def _merge_economic_metadata(
         estimated_revenue=metadata.estimated_revenue if metadata is not None else None,
         estimated_cost=metadata.estimated_cost if metadata is not None else None,
         estimated_profit=metadata.estimated_profit if metadata is not None else None,
+    )
+
+
+def _merge_climate_metadata(
+    metadata: ExplanationClimateMetadata | None,
+    reasons: list[str],
+    warnings: list[str],
+    strengths: list[str],
+    weaknesses: list[str],
+    risks: list[str],
+) -> ExplanationClimateMetadata | None:
+    merged_reasons = _dedupe_messages(
+        [*(metadata.reasons if metadata is not None else []), *reasons]
+    )
+    merged_warnings = _dedupe_messages(
+        [*(metadata.warnings if metadata is not None else []), *warnings]
+    )
+    merged_strengths = _dedupe_messages(
+        [*(metadata.strengths if metadata is not None else []), *strengths]
+    )
+    merged_weaknesses = _dedupe_messages(
+        [*(metadata.weaknesses if metadata is not None else []), *weaknesses]
+    )
+    merged_risks = _dedupe_messages(
+        [*(metadata.risks if metadata is not None else []), *risks]
+    )
+
+    if (
+        not merged_reasons
+        and not merged_warnings
+        and not merged_strengths
+        and not merged_weaknesses
+        and not merged_risks
+    ):
+        return metadata
+
+    return ExplanationClimateMetadata(
+        reasons=merged_reasons,
+        warnings=merged_warnings,
+        strengths=merged_strengths,
+        weaknesses=merged_weaknesses,
+        risks=merged_risks,
     )
 
 

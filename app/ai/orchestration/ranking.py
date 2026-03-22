@@ -59,6 +59,7 @@ class RankedFieldResultInternal:
     economic_weaknesses: list[str]
     economic_risks: list[str]
     climate_reasons: list[str]
+    climate_warnings: list[str]
     climate_strengths: list[str]
     climate_weaknesses: list[str]
     climate_risks: list[str]
@@ -296,12 +297,14 @@ class RankingOrchestrator:
             blockers=scoring_result.blockers,
             reasons=_merge_reasons(
                 scoring_result.reasons,
+                scoring_result.climate_warnings,
                 economic_assessment.reasons if economic_assessment is not None else [],
             ),
             economic_strengths=economic_assessment.strengths if economic_assessment is not None else [],
             economic_weaknesses=economic_assessment.weaknesses if economic_assessment is not None else [],
             economic_risks=economic_assessment.risks if economic_assessment is not None else [],
             climate_reasons=list(scoring_result.climate_reasons),
+            climate_warnings=list(scoring_result.climate_warnings),
             climate_strengths=list(scoring_result.climate_strengths),
             climate_weaknesses=list(scoring_result.climate_weaknesses),
             climate_risks=list(scoring_result.climate_risks),

@@ -80,17 +80,21 @@ class ClimateSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field_id: int | str | UUID | None = None
+    avg_avg_temp: float | None = None
     avg_temp: float | None = None
     avg_min_temp: float | None = None
     avg_max_temp: float | None = None
     min_observed_temp: float | None = None
     max_observed_temp: float | None = None
+    total_rainfall_mm: float | None = None
     total_rainfall: float | None = None
     avg_humidity: float | None = None
     avg_wind_speed: float | None = None
     avg_solar_radiation: float | None = None
     total_et0: float | None = Field(default=None, ge=0)
+    frost_days_count: int = 0
     frost_days: int = 0
+    heat_days_count: int = 0
     heat_days: int = 0
     weather_record_count: int = 0
     observation_days_count: int = 0
@@ -105,6 +109,22 @@ class ClimateSummary(BaseModel):
     def normalize_counts(self) -> "ClimateSummary":
         """Backfill derived count fields for backwards-compatible callers."""
 
+        if self.avg_avg_temp is None and self.avg_temp is not None:
+            self.avg_avg_temp = self.avg_temp
+        if self.avg_temp is None and self.avg_avg_temp is not None:
+            self.avg_temp = self.avg_avg_temp
+        if self.total_rainfall_mm is None and self.total_rainfall is not None:
+            self.total_rainfall_mm = self.total_rainfall
+        if self.total_rainfall is None and self.total_rainfall_mm is not None:
+            self.total_rainfall = self.total_rainfall_mm
+        if self.frost_days_count <= 0 and self.frost_days > 0:
+            self.frost_days_count = self.frost_days
+        if self.frost_days <= 0 and self.frost_days_count > 0:
+            self.frost_days = self.frost_days_count
+        if self.heat_days_count <= 0 and self.heat_days > 0:
+            self.heat_days_count = self.heat_days
+        if self.heat_days <= 0 and self.heat_days_count > 0:
+            self.heat_days = self.heat_days_count
         if self.observation_days_count <= 0 and self.weather_record_count > 0:
             self.observation_days_count = self.weather_record_count
         if self.weather_record_count <= 0 and self.observation_days_count > 0:

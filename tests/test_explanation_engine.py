@@ -107,8 +107,10 @@ def test_ranked_field_explanation_surfaces_positive_strengths():
     explanation = build_ranked_field_explanation(ranked.ranked_fields[0])
 
     assert "ranked highly" in explanation.short_explanation.lower()
+    assert "Average temperature is within the crop's ideal range." in explanation.strengths
     assert "pH is within ideal range." in explanation.strengths
     assert "Field has irrigation available." in explanation.strengths
+    assert "Climate:" in explanation.detailed_explanation
     assert "Strengths:" in explanation.detailed_explanation
     assert explanation.risks == []
 
@@ -215,13 +217,15 @@ def test_explanation_surfaces_climate_weaknesses_when_present():
         heat_tolerance_days=20,
     )
     soil = make_soil()
-    climate_summary = make_climate_summary(total_rainfall=250.0, frost_days=5)
+    climate_summary = make_climate_summary(total_rainfall=250.0, frost_days=5, heat_days=28)
 
     result = calculate_suitability(field_obj, crop, soil, climate_summary=climate_summary)
     explanation = build_suitability_explanation(result, field_obj)
 
-    assert "Rainfall insufficient." in explanation.weaknesses
-    assert "High frost risk detected." in explanation.weaknesses
+    assert "Recent rainfall is below the crop's preferred threshold." in explanation.weaknesses
+    assert "Frost risk is elevated in the recent climate window." in explanation.risks
+    assert "Recent heat stress reduces suitability." in explanation.risks
+    assert "Climate:" in explanation.detailed_explanation
 
 
 def test_ranked_explanation_surfaces_economic_strengths_and_weaknesses():
