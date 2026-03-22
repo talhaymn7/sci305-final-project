@@ -108,6 +108,64 @@ def test_get_climate_summary_computes_expected_metrics(db):
     assert summary.heat_days == 1
 
 
+def test_get_climate_summary_exposes_extended_window_metrics(db):
+    field = _create_field(db)
+    _add_weather_record(
+        db,
+        field.id,
+        date=date(2024, 1, 8),
+        min_temp=2.0,
+        max_temp=14.0,
+        avg_temp=8.0,
+        rainfall_mm=3.0,
+        humidity=55.0,
+        wind_speed=7.0,
+        solar_radiation=15.0,
+        et0=2.5,
+    )
+    _add_weather_record(
+        db,
+        field.id,
+        date=date(2024, 1, 10),
+        min_temp=-1.0,
+        max_temp=38.0,
+        avg_temp=18.5,
+        rainfall_mm=5.0,
+        humidity=65.0,
+        wind_speed=9.0,
+        solar_radiation=17.0,
+        et0=3.5,
+    )
+    db.commit()
+
+    summary = WeatherService(db).get_climate_summary(field.id, days=7)
+
+    assert summary is not None
+    assert summary.avg_min_temp == 0.5
+    assert summary.avg_max_temp == 26.0
+    assert summary.total_et0 == 6.0
+    assert summary.observation_days_count == 2
+    assert summary.missing_days_count == 5
+    assert summary.heat_threshold_c == 35.0
+    assert summary.coverage_ratio == 0.2857
+
+
+def test_get_climate_summaries_returns_bulk_field_lookup(db):
+    field_a = _create_field(db, name="Weather Field A")
+    field_b = _create_field(db, name="Weather Field B")
+    _add_weather_record(db, field_a.id, date=date(2024, 2, 1), avg_temp=12.0, rainfall_mm=4.0)
+    _add_weather_record(db, field_b.id, date=date(2024, 2, 1), max_temp=34.0, avg_temp=24.0, rainfall_mm=0.0)
+    db.commit()
+
+    summaries = WeatherService(db).get_climate_summaries([field_a.id, field_b.id, 9999], days=7)
+
+    assert summaries[field_a.id] is not None
+    assert summaries[field_b.id] is not None
+    assert summaries[9999] is None
+    assert summaries[field_a.id].avg_temp == 12.0
+    assert summaries[field_b.id].avg_temp == 24.0
+
+
 def test_get_climate_summary_honors_heat_threshold_override(db):
     field = _create_field(db)
     _add_weather_record(

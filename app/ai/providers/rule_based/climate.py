@@ -27,6 +27,16 @@ class _ClimateFactor:
 
 
 @dataclass(frozen=True, slots=True)
+class ClimateScorePenalty:
+    """Structured climate penalty surfaced alongside the aggregate climate score."""
+
+    dimension: str
+    code: str
+    message: str
+    points_lost: float
+
+
+@dataclass(frozen=True, slots=True)
 class ClimateAssessment:
     """Rich climate assessment surfaced to suitability, ranking, and explanations."""
 
@@ -34,6 +44,8 @@ class ClimateAssessment:
     climate_score: float | None
     confidence_score: float | None
     reasons: list[str] = field(default_factory=list)
+    penalties: list[ClimateScorePenalty] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     strengths: list[str] = field(default_factory=list)
     weaknesses: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
@@ -61,6 +73,15 @@ def _dedupe_messages(messages: list[str]) -> list[str]:
         seen.add(normalized)
         ordered.append(normalized)
     return ordered
+
+
+def _penalty_code(dimension: str, message: str) -> str:
+    normalized = "".join(
+        character if character.isalnum() else "_"
+        for character in message.strip().lower()
+    )
+    normalized = "_".join(part for part in normalized.split("_") if part)
+    return f"{dimension}_{normalized}"[:96]
 
 
 def _status_from_ratio(ratio: float, *, missing: bool) -> ScoreStatus:
@@ -370,6 +391,34 @@ def _confidence_score(
     return round(max(0.35, min(confidence, 0.96)), 2)
 
 
+def _build_penalties(
+    component_weight: float,
+    weighted_factors: list[tuple[str, _ClimateFactor, float]],
+) -> list[ClimateScorePenalty]:
+    penalties: list[ClimateScorePenalty] = []
+    for dimension, factor, subweight in weighted_factors:
+        points_lost = round(component_weight * subweight * (1.0 - _clamp_ratio(factor.ratio)), 2)
+        if points_lost <= 0:
+            continue
+        message = next(
+            (
+                candidate
+                for candidate in [*factor.weaknesses, *factor.risks, *factor.reasons]
+                if candidate.strip()
+            ),
+            f"{dimension.title()} compatibility reduced the climate score.",
+        )
+        penalties.append(
+            ClimateScorePenalty(
+                dimension=dimension,
+                code=_penalty_code(dimension, message),
+                message=message,
+                points_lost=points_lost,
+            )
+        )
+    return penalties
+
+
 def assess_climate_compatibility(
     crop,
     climate_summary: ClimateSummary | None,
@@ -387,6 +436,7 @@ def assess_climate_compatibility(
         reasons = [
             "Recent climate summary is unavailable; climate scoring used a conservative fallback.",
         ]
+        warnings = ["Recent climate summary is unavailable for this field."]
         component = ScoreComponent(
             key=component_key,
             label=component_label,
@@ -401,8 +451,19 @@ def assess_climate_compatibility(
             climate_score=None,
             confidence_score=0.52,
             reasons=reasons,
-            weaknesses=["Recent climate summary is unavailable for this field."],
-            risks=["Recent climate summary is unavailable for this field."],
+            penalties=[
+                ClimateScorePenalty(
+                    dimension="coverage",
+                    code="coverage_missing_recent_climate_summary",
+                    message=warnings[0],
+                    points_lost=_round_points(
+                        component_weight * (1.0 - active_config.thresholds.missing_climate_ratio)
+                    ),
+                )
+            ],
+            warnings=warnings,
+            weaknesses=warnings,
+            risks=warnings,
         )
 
     temperature = _temperature_factor(climate_summary, requirements, active_config)
@@ -410,6 +471,12 @@ def assess_climate_compatibility(
     frost = _frost_factor(climate_summary, requirements, active_config)
     heat = _heat_factor(climate_summary, requirements, active_config)
     factors = [temperature, rainfall, frost, heat]
+    weighted_factors = [
+        ("temperature", temperature, active_config.climate_subweights.temperature),
+        ("rainfall", rainfall, active_config.climate_subweights.rainfall),
+        ("frost", frost, active_config.climate_subweights.frost),
+        ("heat", heat, active_config.climate_subweights.heat),
+    ]
 
     raw_ratio = (
         (temperature.ratio * active_config.climate_subweights.temperature)
@@ -452,6 +519,16 @@ def assess_climate_compatibility(
     )
 
     climate_score = _normalize_score(weighted_ratio)
+    warnings = _dedupe_messages(
+        [
+            *risks,
+            *(
+                factor.reasons[0]
+                for factor in factors
+                if factor.missing and factor.reasons
+            ),
+        ]
+    )
     return ClimateAssessment(
         component=component,
         climate_score=climate_score,
@@ -461,6 +538,8 @@ def assess_climate_compatibility(
             missing_factor_count=missing_factor_count,
         ),
         reasons=_dedupe_messages(reasons),
+        penalties=_build_penalties(component_weight, weighted_factors),
+        warnings=warnings,
         strengths=strengths,
         weaknesses=weaknesses,
         risks=risks,

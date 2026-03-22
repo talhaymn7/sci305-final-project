@@ -677,6 +677,16 @@ class SuitabilityScorer:
             climate_score_value=climate_score,
             confidence_score=confidence_score,
             climate_reasons=climate_assessment.reasons,
+            climate_warnings=climate_assessment.warnings,
+            climate_penalties=[
+                {
+                    "dimension": penalty.dimension,
+                    "code": penalty.code,
+                    "message": penalty.message,
+                    "points_lost": penalty.points_lost,
+                }
+                for penalty in climate_assessment.penalties
+            ],
             climate_strengths=climate_assessment.strengths,
             climate_weaknesses=climate_assessment.weaknesses,
             climate_risks=climate_assessment.risks,

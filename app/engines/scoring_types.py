@@ -65,6 +65,8 @@ class SuitabilityResult:
     climate_score_value: float | None = None
     confidence_score: float | None = None
     climate_reasons: list[str] = field(default_factory=list)
+    climate_warnings: list[str] = field(default_factory=list)
+    climate_penalties: list[dict[str, float | str]] = field(default_factory=list)
     climate_strengths: list[str] = field(default_factory=list)
     climate_weaknesses: list[str] = field(default_factory=list)
     climate_risks: list[str] = field(default_factory=list)

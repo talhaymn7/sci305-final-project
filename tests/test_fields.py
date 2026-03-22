@@ -1,3 +1,8 @@
+from datetime import date
+
+from app.models.weather_history import WeatherHistory
+
+
 def test_create_field(client, sample_field_data):
     """Test that a field can be created and returns the correct data with an assigned id."""
     response = client.post("/api/v1/fields/", json=sample_field_data)
@@ -33,6 +38,50 @@ def test_get_field_not_found(client):
     """Test that requesting a non-existent field id returns a 404 response."""
     response = client.get("/api/v1/fields/9999")
     assert response.status_code == 404
+
+
+def test_get_field_climate_summary(client, db, created_field):
+    db.add_all(
+        [
+            WeatherHistory(
+                field_id=created_field["id"],
+                date=date(2026, 3, 1),
+                min_temp=4.0,
+                max_temp=16.0,
+                avg_temp=10.0,
+                rainfall_mm=3.0,
+                humidity=58.0,
+                wind_speed=4.0,
+                solar_radiation=14.0,
+                et0=2.0,
+            ),
+            WeatherHistory(
+                field_id=created_field["id"],
+                date=date(2026, 3, 3),
+                min_temp=-1.0,
+                max_temp=38.0,
+                avg_temp=18.5,
+                rainfall_mm=5.0,
+                humidity=62.0,
+                wind_speed=5.0,
+                solar_radiation=18.0,
+                et0=3.0,
+            ),
+        ]
+    )
+    db.commit()
+
+    response = client.get(f"/api/v1/fields/{created_field['id']}/climate-summary?days=7")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["field_id"] == created_field["id"]
+    assert payload["avg_temp"] == 14.25
+    assert payload["avg_min_temp"] == 1.5
+    assert payload["avg_max_temp"] == 27.0
+    assert payload["total_et0"] == 5.0
+    assert payload["observation_days_count"] == 2
+    assert payload["missing_days_count"] == 5
 
 
 def test_update_field(client, created_field):

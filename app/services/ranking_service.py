@@ -279,10 +279,7 @@ def _get_ranked_fields_response_fallback(
     climate_lookup = None
     if tables_exist(db, "weather_history"):
         weather_service = WeatherService(db)
-        climate_lookup = {
-            field_row["id"]: weather_service.get_climate_summary(field_row["id"])
-            for field_row in field_rows
-        }
+        climate_lookup = weather_service.get_climate_summaries([field_row["id"] for field_row in field_rows])
     yield_service = YieldPredictionService(db)
     yield_lookup = {
         field_row["id"]: yield_service.predict_for_entities(
@@ -565,10 +562,7 @@ def get_ranked_fields_response(
         for field in fields
     }
     weather_service = WeatherService(db)
-    climate_lookup = {
-        field.id: weather_service.get_climate_summary(field.id)
-        for field in fields
-    }
+    climate_lookup = weather_service.get_climate_summaries([field.id for field in fields])
     yield_service = YieldPredictionService(db)
     yield_lookup = {
         field.id: yield_service.predict_for_entities(

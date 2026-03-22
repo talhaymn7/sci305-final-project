@@ -80,6 +80,8 @@ class ClimateFeatureSummary:
     """Normalized climate summary shared across AI feature builders."""
 
     avg_temp: float | None
+    avg_min_temp: float | None
+    avg_max_temp: float | None
     total_rainfall: float | None
     frost_days: int | None
     heat_days: int | None
@@ -88,8 +90,12 @@ class ClimateFeatureSummary:
     avg_humidity: float | None = None
     avg_wind_speed: float | None = None
     avg_solar_radiation: float | None = None
+    total_et0: float | None = None
     weather_record_count: int | None = None
+    observation_days_count: int | None = None
+    missing_days_count: int | None = None
     lookback_days: int | None = None
+    heat_threshold_c: float | None = None
     coverage_ratio: float | None = None
 
 

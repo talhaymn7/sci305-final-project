@@ -7,6 +7,7 @@ from app.api.service_errors import raise_http_exception_for_service_error
 from app.database import get_db
 from app.schemas.field import FieldCreate, FieldRead, FieldUpdate
 from app.schemas.management import ManagementPlanRead
+from app.schemas.weather_history import ClimateSummary
 from app.services import field_catalog_service
 from app.services.management_service import (
     MAX_PLAN_WEEKS,
@@ -14,6 +15,8 @@ from app.services.management_service import (
     ManagementPlanNotFoundError,
     ManagementService,
 )
+from app.services.errors import NotFoundError
+from app.services.weather_service import WeatherService
 
 router = APIRouter(prefix="/fields", tags=["fields"])
 
@@ -39,6 +42,22 @@ def list_fields(
 def get_field(field_id: str, db: Session = Depends(get_db)):
     try:
         return field_catalog_service.get_field(db, field_id)
+    except Exception as exc:
+        raise_http_exception_for_service_error(exc)
+
+
+@router.get("/{field_id}/climate-summary", response_model=ClimateSummary)
+def get_field_climate_summary(
+    field_id: str,
+    days: int = Query(default=30, ge=1, le=366),
+    db: Session = Depends(get_db),
+):
+    try:
+        field_record = field_catalog_service.get_field(db, field_id)
+        summary = WeatherService(db).get_climate_summary(field_record["id"], days=days)
+        if summary is None:
+            raise NotFoundError("Climate summary not found for field")
+        return summary
     except Exception as exc:
         raise_http_exception_for_service_error(exc)
 

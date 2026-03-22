@@ -44,10 +44,7 @@ def rank_fields(
         for field_obj in fields
     }
     weather_service = WeatherService(db)
-    climate_lookup = {
-        field_obj.id: weather_service.get_climate_summary(field_obj.id)
-        for field_obj in fields
-    }
+    climate_lookup = weather_service.get_climate_summaries([field_obj.id for field_obj in fields])
     economic_service = EconomicService(db)
     economic_lookup = {
         field_obj.id: economic_service.calculate_profit(

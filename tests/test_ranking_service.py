@@ -204,7 +204,9 @@ def test_get_ranked_fields_response_uses_climate_summary_for_ranking(db):
     assert "climate_compatibility" in response.ranked_results[0].breakdown
     assert response.ranked_results[0].climate_score is not None
     assert response.ranked_results[0].climate_strengths
+    assert response.ranked_results[0].climate_reasons
     assert response.ranked_results[1].climate_risks
+    assert any("rainfall" in message.lower() or "frost" in message.lower() for message in response.ranked_results[1].weaknesses)
     assert response.ranked_results[0].total_score > response.ranked_results[1].total_score
 
 

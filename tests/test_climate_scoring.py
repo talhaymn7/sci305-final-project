@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.engines.climate_scoring import score_climate_compatibility
+from app.engines.climate_scoring import assess_climate_compatibility, score_climate_compatibility
 from app.engines.scoring_config import load_scoring_config
 from app.engines.scoring_types import ScoreStatus
 from app.engines.suitability_engine import calculate_suitability
@@ -147,3 +147,18 @@ def test_missing_crop_climate_requirements_return_conservative_partial_score():
     assert component.status in {ScoreStatus.ACCEPTABLE, ScoreStatus.IDEAL}
     assert 0 < component.awarded_points <= component.max_points
     assert "Crop climate targets were inferred from AgriMind default crop benchmarks." in component.reasons
+
+
+def test_climate_assessment_returns_structured_penalties_and_warnings():
+    assessment = assess_climate_compatibility(
+        make_crop(frost_tolerance_days=1, heat_tolerance_days=4),
+        make_climate_summary(total_rainfall=250.0, frost_days=3, heat_days=7),
+        CONFIG,
+    )
+
+    assert assessment.climate_score is not None
+    assert assessment.penalties
+    assert any(penalty.dimension == "rainfall" for penalty in assessment.penalties)
+    assert any(penalty.dimension == "frost" for penalty in assessment.penalties)
+    assert "Rainfall insufficient." in assessment.warnings
+    assert "High frost risk detected." in assessment.warnings

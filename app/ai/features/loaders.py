@@ -156,6 +156,8 @@ def _build_climate_summary(climate_summary: ClimateSummary | None) -> ClimateFea
 
     return ClimateFeatureSummary(
         avg_temp=climate_summary.avg_temp,
+        avg_min_temp=climate_summary.avg_min_temp,
+        avg_max_temp=climate_summary.avg_max_temp,
         total_rainfall=climate_summary.total_rainfall,
         frost_days=climate_summary.frost_days,
         heat_days=climate_summary.heat_days,
@@ -164,8 +166,12 @@ def _build_climate_summary(climate_summary: ClimateSummary | None) -> ClimateFea
         avg_humidity=climate_summary.avg_humidity,
         avg_wind_speed=climate_summary.avg_wind_speed,
         avg_solar_radiation=climate_summary.avg_solar_radiation,
+        total_et0=climate_summary.total_et0,
         weather_record_count=climate_summary.weather_record_count,
+        observation_days_count=climate_summary.observation_days_count,
+        missing_days_count=climate_summary.missing_days_count,
         lookback_days=climate_summary.lookback_days,
+        heat_threshold_c=climate_summary.heat_threshold_c,
         coverage_ratio=climate_summary.coverage_ratio,
     )
 

@@ -20,15 +20,14 @@ from datetime import date, timedelta
 from typing import Any, Protocol, Sequence
 from uuid import UUID
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.reflection import reflect_tables, table_has_columns
+from app.db.reflection import table_has_columns
 from app.models.field import Field
 from app.models.weather_history import WeatherHistory
 from app.schemas.weather_history import ClimateSummary, WeatherHistoryCreate
-from app.services.climate_feature_builder import ClimateFeatureBuilder
+from app.services.climate_summary_service import ClimateSummaryService
 
 
 class WeatherProvider(Protocol):
@@ -123,58 +122,25 @@ class WeatherService:
     ) -> ClimateSummary | None:
         """Return an aggregated climate summary anchored to the latest stored field date."""
 
-        resolved_days = days or settings.CLIMATE_LOOKBACK_DAYS
-        resolved_heat_threshold = heat_threshold_c or settings.HEAT_DAY_THRESHOLD
-        builder = ClimateFeatureBuilder()
+        return ClimateSummaryService(self.db).get_field_summary(
+            field_id,
+            days=days or settings.CLIMATE_LOOKBACK_DAYS,
+            heat_threshold_c=heat_threshold_c or settings.HEAT_DAY_THRESHOLD,
+        )
 
-        if self._supports_orm_weather_service():
-            recent_weather = self.get_recent_weather(int(field_id), days=resolved_days)
-            observations = [
-                builder.observation_from_mapping(
-                    {
-                        "date": record.date,
-                        "min_temp": record.min_temp,
-                        "max_temp": record.max_temp,
-                        "avg_temp": record.avg_temp,
-                        "rainfall_mm": record.rainfall_mm,
-                        "humidity": record.humidity,
-                        "wind_speed": record.wind_speed,
-                        "solar_radiation": record.solar_radiation,
-                    }
-                )
-                for record in recent_weather
-            ]
-            return builder.build_summary(
-                [observation for observation in observations if observation is not None],
-                lookback_days=resolved_days,
-                heat_day_threshold=resolved_heat_threshold,
-            )
+    def get_climate_summaries(
+        self,
+        field_ids: Sequence[int | str | UUID],
+        *,
+        days: int | None = None,
+        heat_threshold_c: float | None = None,
+    ) -> dict[int | str | UUID, ClimateSummary | None]:
+        """Return climate summaries for multiple fields using shared SQL aggregation."""
 
-        weather_history_table = reflect_tables(self.db, "weather_history")["weather_history"]
-        date_column_name = "date" if "date" in weather_history_table.c else "weather_date"
-        date_column = getattr(weather_history_table.c, date_column_name)
-        normalized_field_id = self._normalize_identifier(weather_history_table.c.field_id, field_id)
-        latest_date = self.db.execute(
-            select(func.max(date_column)).where(weather_history_table.c.field_id == normalized_field_id)
-        ).scalar_one_or_none()
-        if latest_date is None:
-            return None
-
-        start_date = self._window_start(latest_date, resolved_days)
-        rows = self.db.execute(
-            select(weather_history_table)
-            .where(weather_history_table.c.field_id == normalized_field_id)
-            .where(date_column >= start_date, date_column <= latest_date)
-            .order_by(date_column.desc())
-        ).mappings().all()
-        observations = [
-            builder.observation_from_mapping(row, date_column_name=date_column_name)
-            for row in rows
-        ]
-        return builder.build_summary(
-            [observation for observation in observations if observation is not None],
-            lookback_days=resolved_days,
-            heat_day_threshold=resolved_heat_threshold,
+        return ClimateSummaryService(self.db).get_field_summaries(
+            field_ids,
+            days=days or settings.CLIMATE_LOOKBACK_DAYS,
+            heat_threshold_c=heat_threshold_c or settings.HEAT_DAY_THRESHOLD,
         )
 
     def _get_latest_weather_date(self, field_id: int) -> date | None:
