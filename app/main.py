@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.registry import get_ai_provider_registry
-from app.api import agri_assistant, crop_profiles, crops, dashboards, fields, ranking, recommendations, soil_tests
+from app.api import agri_assistant, crop_profiles, crops, dashboards, fields, hemp, ranking, recommendations, soil_tests
 from app.config import settings
 from app.db import check_database_connection, dispose_database_engine
 from app import models  # noqa: F401
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     app.include_router(ranking.router, prefix=settings.API_V1_PREFIX)
     app.include_router(recommendations.router, prefix=settings.API_V1_PREFIX)
     app.include_router(agri_assistant.router, prefix=settings.API_V1_PREFIX)
+    app.include_router(hemp.router, prefix=settings.API_V1_PREFIX)
 
     return app
 
