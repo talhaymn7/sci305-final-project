@@ -202,3 +202,115 @@ def test_yield_in_dekar_range():
     req = _base_request()
     result = provider.predict(req)
     assert 0.0 <= result.expected_yield_ton_dekar <= 1.0
+
+
+# ── Historical provider tests ─────────────────────────────────────────────────
+from app.ai.providers.ml.hemp_historical import HistoricalHempProvider
+from app.schemas.hemp_cycle import CycleRecord
+
+
+def _make_cycle(
+    cycle_id: str,
+    predicted: float,
+    actual: float,
+    rec_n: float = 8.0,
+    applied_n: float = 8.0,
+) -> CycleRecord:
+    return CycleRecord(
+        cycle_id=cycle_id,
+        predicted_yield_ton_dekar=predicted,
+        rec_nitrogen_kg_dekar=rec_n,
+        rec_phosphorus_kg_dekar=3.0,
+        rec_potassium_kg_dekar=6.0,
+        rec_irrigation_mm_week=5.0,
+        applied_nitrogen_kg_dekar=applied_n,
+        applied_phosphorus_kg_dekar=3.0,
+        applied_potassium_kg_dekar=6.0,
+        applied_irrigation_mm_season=100.0,
+        actual_yield_ton_dekar=actual,
+        actual_moisture_percent=12.0,
+        cycle_days=120,
+    )
+
+
+def _make_cold_start(yield_val: float = 0.50) -> HempPrescriptionResult:
+    return HempPrescriptionResult(
+        rec_nitrogen_kg_dekar=8.0, rec_phosphorus_kg_dekar=3.0,
+        rec_potassium_kg_dekar=6.0, rec_irrigation_mm_week=5.0,
+        expected_yield_ton_dekar=yield_val, suitable=True,
+        confidence=0.80, provider="xgboost",
+    )
+
+
+def test_historical_no_cycles_returns_cold_start():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    cold = _make_cold_start()
+    result = provider.predict(req, [], cold)
+    assert result is cold
+
+
+def test_historical_upward_correction_when_actual_exceeds_predicted():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    cycles = [_make_cycle("c1", predicted=0.50, actual=0.60)]
+    cold = _make_cold_start(0.50)
+    result = provider.predict(req, cycles, cold)
+    assert result.expected_yield_ton_dekar > cold.expected_yield_ton_dekar
+
+
+def test_historical_downward_correction_when_actual_below_predicted():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    cycles = [_make_cycle("c1", predicted=0.50, actual=0.35)]
+    cold = _make_cold_start(0.50)
+    result = provider.predict(req, cycles, cold)
+    assert result.expected_yield_ton_dekar < cold.expected_yield_ton_dekar
+
+
+def test_historical_n_reduced_when_less_applied_with_good_yield():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    # Applied 6.5 kg/dekar (rec=8.0) but actual/predicted ratio >= 0.93
+    cycles = [_make_cycle("c1", predicted=0.50, actual=0.48, rec_n=8.0, applied_n=6.5)]
+    cold = _make_cold_start(0.50)
+    result = provider.predict(req, cycles, cold)
+    assert result.rec_nitrogen_kg_dekar < cold.rec_nitrogen_kg_dekar
+
+
+def test_historical_confidence_grows_with_more_cycles():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    cold = _make_cold_start()
+    one = provider.predict(req, [_make_cycle("c1", 0.5, 0.5)], cold)
+    two = provider.predict(req, [_make_cycle("c1", 0.5, 0.5), _make_cycle("c2", 0.5, 0.5)], cold)
+    assert two.confidence > one.confidence
+
+
+def test_historical_confidence_capped_at_095():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    cold = _make_cold_start()
+    many_cycles = [_make_cycle(f"c{i}", 0.5, 0.5) for i in range(10)]
+    result = provider.predict(req, many_cycles, cold)
+    assert result.confidence <= 0.95
+
+
+def test_historical_provider_field():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    cycles = [_make_cycle("c1", 0.5, 0.5)]
+    cold = _make_cold_start()
+    result = provider.predict(req, cycles, cold)
+    assert result.provider == "historical"
+
+
+def test_historical_correction_factor_clamped():
+    provider = HistoricalHempProvider()
+    req = _base_request()
+    # Extreme over-performance: actual = 6x predicted
+    cycles = [_make_cycle("c1", predicted=0.10, actual=0.60)]
+    cold = _make_cold_start(0.50)
+    result = provider.predict(req, cycles, cold)
+    # Factor clamped at 2.0 -> result <= 2 * cold_start + floating point tolerance
+    assert result.expected_yield_ton_dekar <= cold.expected_yield_ton_dekar * 2.0 + 0.001
