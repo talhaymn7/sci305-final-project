@@ -48,14 +48,14 @@ def _build_notes(request: HempPrescriptionRequest, result: HempPrescriptionResul
         notes.append(f"pH {request.ph} is outside the ideal 6.0–7.0 range — consider lime or sulfur amendment.")
     if request.drainage_class == "poor":
         notes.append("Poor drainage raises waterlogging risk during wet spells — raised beds or tile drainage recommended.")
-    if result.rec_nitrogen_kg_ha > 80:
-        notes.append(f"High N deficit ({result.rec_nitrogen_kg_ha:.0f} kg/ha) — split application across two dressings.")
-    if not request.irrigation_available and request.seasonal_rainfall_mm < 300:
+    if result.rec_nitrogen_kg_dekar > 8.0:
+        notes.append(f"High N deficit ({result.rec_nitrogen_kg_dekar:.0f} kg/dekar) — split application across two dressings.")
+    if request.irrigation_type == "none" and request.seasonal_rainfall_mm < 300:
         notes.append("Seasonal rainfall below 300 mm with no irrigation — drought stress likely during vegetative stage.")
     if request.slope_percent > 12:
         notes.append(f"Slope {request.slope_percent}% increases erosion risk — contour cultivation or cover strips advised.")
-    if result.expected_yield_ton_ha < 3.0:
-        notes.append("Forecast yield below 3 t/ha — agronomic conditions are suboptimal for fiber hemp.")
+    if result.expected_yield_ton_dekar < 0.30:
+        notes.append("Forecast yield below 0.30 t/dekar — agronomic conditions are suboptimal for fiber hemp.")
 
     return notes
 
@@ -72,11 +72,11 @@ def compute_hemp_prescription(
     blockers = _check_blockers(request)
     if blockers:
         return HempPrescriptionResult(
-            rec_nitrogen_kg_ha=0.0,
-            rec_phosphorus_kg_ha=0.0,
-            rec_potassium_kg_ha=0.0,
+            rec_nitrogen_kg_dekar=0.0,
+            rec_phosphorus_kg_dekar=0.0,
+            rec_potassium_kg_dekar=0.0,
             rec_irrigation_mm_week=0.0,
-            expected_yield_ton_ha=0.0,
+            expected_yield_ton_dekar=0.0,
             suitable=False,
             blockers=blockers,
             notes=[],
@@ -85,14 +85,29 @@ def compute_hemp_prescription(
 
     provider = _get_provider(model_dir)
     raw = provider.predict(request)
-    notes = _build_notes(request, raw)
 
+    # When the ML classifier determines the field is unsuitable (soft constraint,
+    # distinct from the hard blockers above), return early without prescriptions.
+    if not raw.suitable:
+        return HempPrescriptionResult(
+            rec_nitrogen_kg_dekar=0.0,
+            rec_phosphorus_kg_dekar=0.0,
+            rec_potassium_kg_dekar=0.0,
+            rec_irrigation_mm_week=0.0,
+            expected_yield_ton_dekar=0.0,
+            suitable=False,
+            blockers=[],
+            notes=["Field conditions do not meet the minimum suitability threshold for hemp cultivation."],
+            provider=raw.provider,
+        )
+
+    notes = _build_notes(request, raw)
     return HempPrescriptionResult(
-        rec_nitrogen_kg_ha=raw.rec_nitrogen_kg_ha,
-        rec_phosphorus_kg_ha=raw.rec_phosphorus_kg_ha,
-        rec_potassium_kg_ha=raw.rec_potassium_kg_ha,
+        rec_nitrogen_kg_dekar=raw.rec_nitrogen_kg_dekar,
+        rec_phosphorus_kg_dekar=raw.rec_phosphorus_kg_dekar,
+        rec_potassium_kg_dekar=raw.rec_potassium_kg_dekar,
         rec_irrigation_mm_week=raw.rec_irrigation_mm_week,
-        expected_yield_ton_ha=raw.expected_yield_ton_ha,
+        expected_yield_ton_dekar=raw.expected_yield_ton_dekar,
         suitable=True,
         blockers=[],
         notes=notes,
