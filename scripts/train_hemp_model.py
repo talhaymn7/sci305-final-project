@@ -1,20 +1,23 @@
 """
-Hemp prescription model trainer.
+Hemp nested XGBoost trainer — Stage 1 classifier + Stage 2 yield regressor.
 
-Reads data/hemp_training.csv, trains five independent XGBoost regressors
-(one per prescription target), evaluates each on a held-out test split, and
-persists artifacts to artifacts/hemp_model/.
+Stage 1: binary classifier (suitable = 1 / unsuitable = 0)
+  - Trains on all samples from the dataset.
+  - Learns which field conditions make hemp cultivation viable.
 
-Targets:
-  rec_nitrogen_kg_ha      – nitrogen application rate
-  rec_phosphorus_kg_ha    – phosphorus application rate
-  rec_potassium_kg_ha     – potassium application rate
-  rec_irrigation_mm_week  – weekly irrigation volume
-  expected_yield_ton_ha   – forecasted fiber yield
+Stage 2: yield regressor (expected_yield_ton_ha)
+  - Trains ONLY on samples where suitable == 1.
+  - Called only when Stage 1 predicts suitable; never extrapolates to bad fields.
+
+Artifacts saved to artifacts/hemp_model/:
+  hemp_classifier.json   — XGBoost binary classifier
+  hemp_regressor.json    — XGBoost yield regressor
+  hemp_model_metadata.json — encoder + metrics
 
 Run:
+    python scripts/generate_hemp_dataset.py   # create data/hemp_training.csv first
     python scripts/train_hemp_model.py
-    python scripts/train_hemp_model.py --samples 1000 --seed 7
+    python scripts/train_hemp_model.py --samples 3000 --seed 7
 """
 
 from __future__ import annotations
@@ -42,39 +45,30 @@ except ImportError as exc:
 DATA_PATH = PROJECT_ROOT / "data" / "hemp_training.csv"
 MODEL_DIR = PROJECT_ROOT / "artifacts" / "hemp_model"
 
-# ── Feature schema ─────────────────────────────────────────────────────────────
+# ── Feature schema (must match HempPrescriptionRequest field order) ────────────
 NUMERIC_FEATURES = [
-    "ph",
-    "nitrogen_ppm",
-    "phosphorus_ppm",
-    "potassium_ppm",
-    "organic_matter_percent",
-    "ec",
-    "area_hectares",
-    "slope_percent",
-    "irrigation_available",
-    "elevation_meters",
-    "avg_temp",
-    "seasonal_rainfall_mm",
-    "avg_humidity",
-    "avg_solar_radiation",
+    "ph", "nitrogen_ppm", "phosphorus_ppm", "potassium_ppm",
+    "organic_matter_percent", "ec", "area_dekar", "slope_percent",
+    "first_hemp_season", "elevation_meters", "avg_temp",
+    "seasonal_rainfall_mm", "avg_humidity", "avg_solar_radiation",
+    "rotation_n_credit",
 ]
+CATEGORICAL_FEATURES = ["drainage_class", "texture_class", "variety", "irrigation_type"]
 
-CATEGORICAL_FEATURES = [
-    "drainage_class",
-    "texture_class",
-]
+# ── XGBoost hyper-parameters ──────────────────────────────────────────────────
+CLASSIFIER_PARAMS: dict[str, Any] = {
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+    "max_depth": 4,
+    "eta": 0.05,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "alpha": 0.1,
+    "lambda": 1.0,
+}
+CLASSIFIER_ROUNDS = 150
 
-TARGETS = [
-    "rec_nitrogen_kg_ha",
-    "rec_phosphorus_kg_ha",
-    "rec_potassium_kg_ha",
-    "rec_irrigation_mm_week",
-    "expected_yield_ton_ha",
-]
-
-# XGBoost hyper-parameters (shared across all targets)
-XGB_PARAMS: dict[str, Any] = {
+REGRESSOR_PARAMS: dict[str, Any] = {
     "objective": "reg:squarederror",
     "max_depth": 5,
     "eta": 0.05,
@@ -83,27 +77,30 @@ XGB_PARAMS: dict[str, Any] = {
     "alpha": 0.05,
     "lambda": 1.0,
 }
-NUM_BOOST_ROUND = 150
+REGRESSOR_ROUNDS = 150
+
 TEST_FRACTION = 0.20
 
 
 # ── Data classes ───────────────────────────────────────────────────────────────
 
 @dataclass
-class TargetMetrics:
-    target: str
+class ClassifierMetrics:
+    train_size: int
+    test_size: int
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+
+
+@dataclass
+class RegressorMetrics:
     train_size: int
     test_size: int
     rmse: float
     mae: float
     r2: float
-
-
-@dataclass
-class TrainingResult:
-    metrics: list[TargetMetrics]
-    feature_names: list[str]
-    category_levels: dict[str, list[str]]
 
 
 # ── CSV loading ────────────────────────────────────────────────────────────────
@@ -116,26 +113,10 @@ def load_csv(path: Path) -> list[dict[str, str]]:
 # ── Feature encoding ───────────────────────────────────────────────────────────
 
 def fit_category_levels(rows: list[dict[str, str]]) -> dict[str, list[str]]:
-    """Collect sorted unique values for each categorical feature."""
     levels: dict[str, list[str]] = {}
     for feature in CATEGORICAL_FEATURES:
-        values = sorted({row[feature] for row in rows})
-        levels[feature] = values
+        levels[feature] = sorted({row[feature] for row in rows})
     return levels
-
-
-def encode_row(row: dict[str, str], levels: dict[str, list[str]]) -> list[float]:
-    vector: list[float] = []
-
-    for feature in NUMERIC_FEATURES:
-        vector.append(float(row[feature]))
-
-    for feature in CATEGORICAL_FEATURES:
-        value = row[feature]
-        for level in levels[feature]:
-            vector.append(1.0 if value == level else 0.0)
-
-    return vector
 
 
 def build_feature_names(levels: dict[str, list[str]]) -> list[str]:
@@ -144,6 +125,15 @@ def build_feature_names(levels: dict[str, list[str]]) -> list[str]:
         for level in levels[feature]:
             names.append(f"{feature}={level}")
     return names
+
+
+def encode_row(row: dict[str, str], levels: dict[str, list[str]]) -> list[float]:
+    vector: list[float] = [float(row[f]) for f in NUMERIC_FEATURES]
+    for feature in CATEGORICAL_FEATURES:
+        value = row[feature]
+        for level in levels[feature]:
+            vector.append(1.0 if value == level else 0.0)
+    return vector
 
 
 def encode_all(rows: list[dict[str, str]], levels: dict[str, list[str]]) -> list[list[float]]:
@@ -161,111 +151,92 @@ def split(rows: list, fraction: float, seed: int) -> tuple[list, list]:
 
 # ── Metrics ────────────────────────────────────────────────────────────────────
 
-def rmse(actual: list[float], predicted: list[float]) -> float:
+def _rmse(actual: list[float], predicted: list[float]) -> float:
     n = len(actual)
     return round(math.sqrt(sum((a - p) ** 2 for a, p in zip(actual, predicted)) / n), 4)
 
 
-def mae(actual: list[float], predicted: list[float]) -> float:
-    n = len(actual)
-    return round(sum(abs(a - p) for a, p in zip(actual, predicted)) / n, 4)
+def _mae(actual: list[float], predicted: list[float]) -> float:
+    return round(sum(abs(a - p) for a, p in zip(actual, predicted)) / len(actual), 4)
 
 
-def r2(actual: list[float], predicted: list[float]) -> float:
+def _r2(actual: list[float], predicted: list[float]) -> float:
     mean_y = sum(actual) / len(actual)
     ss_tot = sum((a - mean_y) ** 2 for a in actual)
     ss_res = sum((a - p) ** 2 for a, p in zip(actual, predicted))
-    if ss_tot == 0.0:
-        return 1.0
-    return round(1.0 - ss_res / ss_tot, 4)
+    return round(1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0, 4)
 
 
-# ── Model training ─────────────────────────────────────────────────────────────
+def _classifier_metrics(
+    y_true: list[float],
+    y_prob: list[float],
+    train_size: int,
+    test_size: int,
+) -> ClassifierMetrics:
+    y_pred = [1.0 if p >= 0.5 else 0.0 for p in y_prob]
+    tp = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 1)
+    fp = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 1)
+    fn = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 0)
+    tn = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 0)
+    accuracy = (tp + tn) / max(1, len(y_true))
+    precision = tp / max(1, tp + fp)
+    recall = tp / max(1, tp + fn)
+    f1 = 2 * precision * recall / max(1e-9, precision + recall)
+    return ClassifierMetrics(
+        train_size=train_size, test_size=test_size,
+        accuracy=round(accuracy, 4), precision=round(precision, 4),
+        recall=round(recall, 4), f1=round(f1, 4),
+    )
 
-def train_one_target(
+
+# ── Training ───────────────────────────────────────────────────────────────────
+
+def train_classifier(
     X_train: list[list[float]],
     y_train: list[float],
     X_test: list[list[float]],
     y_test: list[float],
     feature_names: list[str],
-    target_name: str,
     seed: int,
-) -> tuple[Booster, TargetMetrics]:
-    params = {**XGB_PARAMS, "seed": seed}
+) -> tuple[Booster, ClassifierMetrics]:
+    params = {**CLASSIFIER_PARAMS, "seed": seed}
     dtrain = DMatrix(X_train, label=y_train, feature_names=feature_names)
-    model = xgb_train(params, dtrain, num_boost_round=NUM_BOOST_ROUND)
-
+    model = xgb_train(params, dtrain, num_boost_round=CLASSIFIER_ROUNDS)
     dtest = DMatrix(X_test, feature_names=feature_names)
-    preds = [float(v) for v in model.predict(dtest)]
-
-    metrics = TargetMetrics(
-        target=target_name,
-        train_size=len(y_train),
-        test_size=len(y_test),
-        rmse=rmse(y_test, preds),
-        mae=mae(y_test, preds),
-        r2=r2(y_test, preds),
-    )
+    probs = [float(v) for v in model.predict(dtest)]
+    metrics = _classifier_metrics(y_test, probs, len(y_train), len(y_test))
     return model, metrics
 
 
-def train_all_targets(
-    train_rows: list[dict[str, str]],
-    test_rows: list[dict[str, str]],
+def train_regressor(
     X_train: list[list[float]],
+    y_train: list[float],
     X_test: list[list[float]],
+    y_test: list[float],
     feature_names: list[str],
-    levels: dict[str, list[str]],
     seed: int,
-    output_dir: Path,
-) -> TrainingResult:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    all_metrics: list[TargetMetrics] = []
-
-    for target in TARGETS:
-        y_train = [float(row[target]) for row in train_rows]
-        y_test = [float(row[target]) for row in test_rows]
-
-        model, metrics = train_one_target(
-            X_train, y_train, X_test, y_test, feature_names, target, seed
-        )
-        model_path = output_dir / f"{target}.json"
-        model.save_model(str(model_path))
-        all_metrics.append(metrics)
-
-        print(
-            f"  {target:<28}  RMSE={metrics.rmse:>7.3f}  "
-            f"MAE={metrics.mae:>7.3f}  R²={metrics.r2:>6.4f}"
-        )
-
-    return TrainingResult(
-        metrics=all_metrics,
-        feature_names=feature_names,
-        category_levels=levels,
+) -> tuple[Booster, RegressorMetrics]:
+    params = {**REGRESSOR_PARAMS, "seed": seed}
+    dtrain = DMatrix(X_train, label=y_train, feature_names=feature_names)
+    model = xgb_train(params, dtrain, num_boost_round=REGRESSOR_ROUNDS)
+    dtest = DMatrix(X_test, feature_names=feature_names)
+    preds = [float(v) for v in model.predict(dtest)]
+    metrics = RegressorMetrics(
+        train_size=len(y_train), test_size=len(y_test),
+        rmse=_rmse(y_test, preds), mae=_mae(y_test, preds), r2=_r2(y_test, preds),
     )
-
-
-# ── Persist metadata ───────────────────────────────────────────────────────────
-
-def save_metadata(result: TrainingResult, output_dir: Path) -> None:
-    payload = {
-        "targets": TARGETS,
-        "feature_names": result.feature_names,
-        "category_levels": result.category_levels,
-        "metrics": [asdict(m) for m in result.metrics],
-    }
-    (output_dir / "hemp_model_metadata.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
+    return model, metrics
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the hemp prescription XGBoost models.")
-    parser.add_argument("--data", default=str(DATA_PATH), help="Path to training CSV.")
-    parser.add_argument("--output-dir", default=str(MODEL_DIR), help="Artifact output directory.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+    parser = argparse.ArgumentParser(
+        description="Train the hemp nested XGBoost pipeline (Stage 1 classifier + Stage 2 regressor)."
+    )
+    parser.add_argument("--data", default=str(DATA_PATH))
+    parser.add_argument("--output-dir", default=str(MODEL_DIR))
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     data_path = Path(args.data)
@@ -275,7 +246,7 @@ def main() -> None:
             "Run: python scripts/generate_hemp_dataset.py"
         )
 
-    print(f"Loading data from {data_path} …")
+    print(f"Loading data from {data_path} ...")
     rows = load_csv(data_path)
     print(f"  {len(rows)} samples loaded.")
 
@@ -283,22 +254,69 @@ def main() -> None:
     feature_names = build_feature_names(levels)
     print(f"  Feature vector size: {len(feature_names)}")
 
+    # Encode all features
+    X_all = encode_all(rows, levels)
+
     train_rows, test_rows = split(rows, TEST_FRACTION, args.seed)
+    X_train_all = encode_all(train_rows, levels)
+    X_test_all = encode_all(test_rows, levels)
     print(f"  Train: {len(train_rows)}  Test: {len(test_rows)}")
 
-    X_train = encode_all(train_rows, levels)
-    X_test = encode_all(test_rows, levels)
+    # ── Stage 1: Classifier ───────────────────────────────────────────────────
+    y_train_cls = [float(r["suitable"]) for r in train_rows]
+    y_test_cls = [float(r["suitable"]) for r in test_rows]
+    n_suitable_train = int(sum(y_train_cls))
+    n_unsuitable_train = len(y_train_cls) - n_suitable_train
+    print(f"\n[Stage 1] Training suitability classifier ...")
+    print(f"  Train labels — suitable: {n_suitable_train}  unsuitable: {n_unsuitable_train}")
 
     output_dir = Path(args.output_dir)
-    print(f"\nTraining {len(TARGETS)} XGBoost models -> {output_dir}\n")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    result = train_all_targets(
-        train_rows, test_rows, X_train, X_test, feature_names, levels, args.seed, output_dir
+    clf_model, clf_metrics = train_classifier(
+        X_train_all, y_train_cls, X_test_all, y_test_cls, feature_names, args.seed
     )
-    save_metadata(result, output_dir)
+    clf_model.save_model(str(output_dir / "hemp_classifier.json"))
+    print(f"  Accuracy:  {clf_metrics.accuracy:.4f}")
+    print(f"  Precision: {clf_metrics.precision:.4f}")
+    print(f"  Recall:    {clf_metrics.recall:.4f}")
+    print(f"  F1 Score:  {clf_metrics.f1:.4f}")
+
+    # ── Stage 2: Regressor (suitable samples only) ────────────────────────────
+    suitable_train = [(r, x) for r, x in zip(train_rows, X_train_all) if r["suitable"] == "1"]
+    suitable_test = [(r, x) for r, x in zip(test_rows, X_test_all) if r["suitable"] == "1"]
+
+    X_train_reg = [x for _, x in suitable_train]
+    y_train_reg = [float(r["expected_yield_ton_dekar"]) for r, _ in suitable_train]
+    X_test_reg = [x for _, x in suitable_test]
+    y_test_reg = [float(r["expected_yield_ton_dekar"]) for r, _ in suitable_test]
+
+    print(f"\n[Stage 2] Training yield regressor (suitable samples only) ...")
+    print(f"  Train size: {len(X_train_reg)}  Test size: {len(X_test_reg)}")
+
+    reg_model, reg_metrics = train_regressor(
+        X_train_reg, y_train_reg, X_test_reg, y_test_reg, feature_names, args.seed
+    )
+    reg_model.save_model(str(output_dir / "hemp_regressor.json"))
+    print(f"  RMSE: {reg_metrics.rmse:.4f} t/dekar")
+    print(f"  MAE:  {reg_metrics.mae:.4f} t/dekar")
+    print(f"  R²:   {reg_metrics.r2:.4f}")
+
+    # ── Save metadata ─────────────────────────────────────────────────────────
+    metadata = {
+        "feature_names": feature_names,
+        "category_levels": levels,
+        "classifier_metrics": asdict(clf_metrics),
+        "regressor_metrics": asdict(reg_metrics),
+    }
+    (output_dir / "hemp_model_metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
 
     print(f"\nArtifacts saved to {output_dir.resolve()}")
-    print("Next: integrate HempPrescriptionProvider into app/ai/providers/ml/")
+    print("  hemp_classifier.json  — Stage 1 suitability classifier")
+    print("  hemp_regressor.json   — Stage 2 yield regressor")
+    print("  hemp_model_metadata.json")
 
 
 if __name__ == "__main__":
