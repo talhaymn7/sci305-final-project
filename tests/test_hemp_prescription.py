@@ -314,3 +314,52 @@ def test_historical_correction_factor_clamped():
     result = provider.predict(req, cycles, cold)
     # Factor clamped at 2.0 -> result <= 2 * cold_start + floating point tolerance
     assert result.expected_yield_ton_dekar <= cold.expected_yield_ton_dekar * 2.0 + 0.001
+
+
+# ── Engine routing tests ──────────────────────────────────────────────────────
+from app.engines.hemp_prescription_engine import compute_hemp_prescription
+
+
+def test_engine_returns_result_no_history():
+    req = _base_request()
+    result = compute_hemp_prescription(req)
+    assert result.suitable is True
+    assert result.provider in ("xgboost", "rule_based")
+
+
+def test_engine_blocker_ph_too_low():
+    req = _base_request(ph=4.5)
+    result = compute_hemp_prescription(req)
+    assert result.suitable is False
+    assert any("pH" in b or "ph" in b.lower() for b in result.blockers)
+
+
+def test_engine_blocker_slope_excessive():
+    req = _base_request(slope_percent=25.0)
+    result = compute_hemp_prescription(req)
+    assert result.suitable is False
+
+
+def test_engine_no_blocker_when_ph_missing():
+    req = HempPrescriptionRequest(area_dekar=50.0, slope_percent=5.0)
+    result = compute_hemp_prescription(req)
+    assert result.suitable is True
+
+
+def test_engine_uses_historical_provider_when_cycles_provided():
+    req = _base_request()
+    cycle = _make_cycle("c1", predicted=0.50, actual=0.60)
+    result = compute_hemp_prescription(req, cycle_history=[cycle])
+    assert result.provider == "historical"
+
+
+def test_engine_cold_start_when_no_cycles():
+    req = _base_request()
+    result = compute_hemp_prescription(req, cycle_history=[])
+    assert result.provider in ("xgboost", "rule_based")
+
+
+def test_engine_notes_attached():
+    req = _base_request(ph=7.5)
+    result = compute_hemp_prescription(req)
+    assert isinstance(result.notes, list)

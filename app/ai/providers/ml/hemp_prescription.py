@@ -100,8 +100,12 @@ class HempPrescriptionProvider:
             return False
         try:
             data = json.loads(meta.read_text(encoding="utf-8"))
+            cat_levels = data["category_levels"]
+            # Reject stale models that don't include the current categorical features
+            if not all(feat in cat_levels for feat in CATEGORICAL_FEATURES):
+                return False
             self._feature_names = data["feature_names"]
-            self._category_levels = data["category_levels"]
+            self._category_levels = cat_levels
             clf = Booster(); clf.load_model(str(clf_path)); self._classifier = clf
             reg = Booster(); reg.load_model(str(reg_path)); self._regressor = reg
             return True
