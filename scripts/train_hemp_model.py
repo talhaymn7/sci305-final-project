@@ -5,7 +5,7 @@ Stage 1: binary classifier (suitable = 1 / unsuitable = 0)
   - Trains on all samples from the dataset.
   - Learns which field conditions make hemp cultivation viable.
 
-Stage 2: yield regressor (expected_yield_ton_ha)
+Stage 2: yield regressor (expected_yield_ton_dekar)
   - Trains ONLY on samples where suitable == 1.
   - Called only when Stage 1 predicts suitable; never extrapolates to bad fields.
 
