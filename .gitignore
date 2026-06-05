@@ -1,4 +1,4 @@
-# Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,30 +10,47 @@ dist/
 build/
 .eggs/
 
-# Virtual environments
+# ── Virtual environments ──────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 
-# Testing
+# ── Testing ───────────────────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Environment
+# ── Environment & secrets ─────────────────────────────────────────────────────
 .env
 
-# IDE
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+~$*
+*.tmp
 
-# Frontend
+# ── Frontend ──────────────────────────────────────────────────────────────────
 frontend/node_modules/
 frontend/dist/
+
+# ── ML artifacts & generated data ─────────────────────────────────────────────
 artifacts/
+data/
+
+# ── Report & document files ───────────────────────────────────────────────────
+REPORT/
+
+# ── AI session & memory files ─────────────────────────────────────────────────
+.claude/
+memory/
+codex.md
+AI_INFO.md
+
+# ── Generated visuals ─────────────────────────────────────────────────────────
+report_photos/

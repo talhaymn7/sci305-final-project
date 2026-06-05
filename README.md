@@ -1,212 +1,137 @@
 # AgriMind
 
-AgriMind is an AI-powered agricultural decision support platform for ranking fields, matching crops to land, and generating explainable recommendations from agronomic data.
+AgriMind is an AI-powered agricultural decision support platform built with FastAPI. It ranks fields for crop suitability, generates agronomic recommendations, and predicts hemp (*Cannabis sativa* L.) yield using a nested XGBoost classification–regression pipeline.
 
-The current repository contains a FastAPI backend MVP with:
+---
 
-- field, crop, and soil test management APIs
-- a rule-based suitability engine
-- multi-field crop ranking
-- explanation generation for each recommendation
-- provider-based AI seams for swapping deterministic, ML, and LLM components
-- sample seed data and automated tests
+## Overview
 
-## Product Goal
+The system addresses a practical gap in precision agriculture: industrial hemp has been largely excluded from systematic yield research due to decades of legal restrictions. AgriMind applies machine learning methods that are well-established for staple crops (maize, wheat) to hemp, combining deterministic agronomic scoring with a two-stage ML pipeline.
 
-The core MVP goal is simple:
+**Two-stage hemp yield model:**
+- **Stage 1 — Suitability Classifier:** XGBoost binary classifier that determines whether a field is viable for hemp cultivation (F1: 0.961, Accuracy: 0.952)
+- **Stage 2 — Yield Regressor:** XGBoost regressor trained only on suitable fields; predicts expected yield in t/dekar (RMSE: 0.065, R²: 0.70)
+- **Historical correction layer:** exponential-weighted adjustment using actual outcomes from prior growing seasons on the same field
 
-> Rank a portfolio of fields and determine the best field for a selected crop.
-
-From that foundation, AgriMind is intended to evolve into a broader agricultural intelligence platform that combines deterministic agronomic rules, machine learning, and natural-language AI.
-
-## Current Backend Scope
-
-Implemented today:
-
-- `fields`: CRUD for field metadata such as area, slope, irrigation availability, and drainage quality
-- `soil_tests`: soil chemistry and texture records per field
-- `crops`: crop requirement profiles including pH, nutrient targets, water, drainage, slope, and minimum area requirements
-- `rank-fields`: rank multiple fields for a selected crop
-- `recommendation`: generate a scored recommendation and human-readable explanation for a field/crop pair
-- `management-plan`: generate a structured weekly irrigation and fertilizer plan for an active field crop cycle
-- `agri-assistant`: ask grounded natural-language questions over deterministic ranking and explanation results
-
-Not implemented yet:
-
-- risk prediction models
-- economic optimization
-- conversation memory or RAG integration
-- frontend dashboard
-
-## How The MVP Makes Decisions
-
-The current decision engine is rule-based and uses weighted scoring from [`config/scoring_weights.json`](/c:/Users/VICTUS/Workspace/AgriMind/config/scoring_weights.json):
-
-- pH compatibility
-- nitrogen availability
-- phosphorus availability
-- potassium availability
-- drainage fit
-- irrigation fit
-- slope fit
-- soil texture fit
-
-In addition to weighted scoring, the engine now applies minimum field area as a blocking constraint so undersized fields are not recommended even if other agronomic conditions look strong.
+---
 
 ## Architecture
 
-The backend now separates domain workflows from AI provider implementations:
+```
+app/
+├── api/            # FastAPI routes (HTTP parsing, error handling)
+├── services/       # Database reads/writes, domain logic
+├── engines/        # Deterministic scoring (suitability, ranking, explanation)
+├── ai/
+│   ├── contracts/  # Abstract provider interfaces
+│   ├── providers/  # rule_based · ml (XGBoost) · llm (OpenAI) · stub
+│   ├── orchestration/  # End-to-end workflows
+│   └── registry.py     # Provider selection via env vars
+├── models/         # SQLAlchemy ORM models
+├── schemas/        # Pydantic I/O contracts
+└── ingestion/      # NASA POWER & FAOSTAT data pipeline
+config/
+└── scoring_weights.json   # Suitability dimension weights
+scripts/
+├── generate_hemp_dataset.py   # Synthetic training data (2,000 samples)
+└── train_hemp_model.py        # Trains Stage 1 + Stage 2 XGBoost models
+migrations/                    # Alembic migration history
+tests/                         # pytest test suite
+```
 
-- `app/api`: FastAPI route handlers
-- `app/services`: data access and persistence logic
-- `app/engines`: compatibility facades for existing suitability, ranking, and explanation imports
-- `app/ai`: provider contracts, registries, orchestration, and concrete rule-based / ML / LLM providers
-- `app/models`: SQLAlchemy models
-- `app/schemas`: Pydantic request/response schemas
-- `migrations`: Alembic migration support
-- `tests`: API and engine tests
+---
 
-The provider layer keeps the business logic stable while allowing AI capabilities to be swapped:
+## Scoring Engine
 
-- data layer: PostgreSQL + SQLAlchemy models
-- knowledge layer: crop profiles and rule logic
-- rule-based providers: suitability, risks, explanation, ranking augmentation, extraction
-- ML providers: yield prediction
-- LLM providers: grounded Q&A and future extraction/generation workflows
-- orchestration layer: ranking, recommendation, yield, and assistant flows
+Field suitability is scored across six weighted dimensions:
 
-## Quick Start
+| Dimension              | Weight |
+|------------------------|--------|
+| Soil compatibility     | 24     |
+| pH compatibility       | 20     |
+| Climate compatibility  | 20     |
+| Water availability     | 16     |
+| Drainage compatibility | 12     |
+| Slope compatibility    | 8      |
 
-### 1. Install dependencies
+Minimum field area is a **hard constraint** — undersized fields are excluded regardless of other scores.
+
+---
+
+## External Data Sources
+
+- **NASA POWER** — daily meteorological data (temperature, rainfall, humidity, solar radiation) fetched per field coordinates
+- **FAOSTAT** — annual crop production and yield statistics for economic scoring
+
+---
+
+## Pluggable AI Providers
+
+Provider selection is via `.env`:
+
+| Variable              | Options                              |
+|-----------------------|--------------------------------------|
+| `YIELD_PROVIDER`      | `stub` · `ml` · `xgboost`           |
+| `EXPLANATION_PROVIDER`| `deterministic` · `rule_based`      |
+| `RISK_PROVIDER`       | `rule_based` · `stub`               |
+| `EXTRACTION_PROVIDER` | `manual` · `rule_based` · `stub`    |
+| `AI_ASSISTANT_PROVIDER`| `openai`                            |
+
+---
+
+## Setup
 
 ```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Configure the database
+# Configure environment
+cp .env.example .env
 
-Create a `.env` file or export `DATABASE_URL`.
+# Apply database migrations
+alembic upgrade head
 
-Example:
-
-```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agrimind
-YIELD_PROVIDER=xgboost
-RISK_PROVIDER=rule_based
-EXPLANATION_PROVIDER=rule_based
-EXTRACTION_PROVIDER=rule_based
-AI_SUITABILITY_PROVIDER=rule_based
-AI_RANKING_AUGMENTATION_PROVIDER=rule_based
-AI_ASSISTANT_PROVIDER=openai
-YIELD_MODEL_DIR=artifacts/yield_model
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
-```
-
-For development or integration testing, the deterministic stub providers can be enabled explicitly:
-
-```env
-YIELD_PROVIDER=stub
-RISK_PROVIDER=stub
-EXPLANATION_PROVIDER=deterministic
-EXTRACTION_PROVIDER=stub
-```
-
-The default configuration is defined in [`app/config.py`](/c:/Users/VICTUS/Workspace/AgriMind/app/config.py).
-
-Short provider env vars are preferred for yield, explanation, risk, and extraction. Legacy `AI_*` names remain supported and are normalized through the same validation rules.
-
-Supported values in the current build:
-
-- `YIELD_PROVIDER`: `stub`, `ml`, or `xgboost`
-- `EXPLANATION_PROVIDER`: `deterministic` or `rule_based`
-- `RISK_PROVIDER`: `rule_based` or `stub`
-- `EXTRACTION_PROVIDER`: `manual`, `rule_based`, or `stub`
-
-Provider ids are validated during settings load and again on startup. Invalid or unknown provider ids fail fast before the API begins serving requests.
-
-### 3. Run the API
-
-```bash
-uvicorn app.main:app --reload
-```
-
-The API starts on `http://localhost:8000` and exposes routes under `http://localhost:8000/api/v1`.
-
-### 4. Seed sample data
-
-```bash
+# Seed sample data
 python seed.py
+
+# Generate hemp training data and train models
+python scripts/generate_hemp_dataset.py
+python scripts/train_hemp_model.py
+
+# Start the API server
+uvicorn app.main:app --reload
+# API available at http://localhost:8000/api/v1
 ```
 
-### 5. Run tests
+---
+
+## API Endpoints
+
+| Method | Endpoint                                          | Description                              |
+|--------|---------------------------------------------------|------------------------------------------|
+| POST   | `/api/v1/rank-fields/`                            | Rank multiple fields for a crop          |
+| GET    | `/api/v1/recommendation/{field_id}/{crop_id}`     | Single field/crop recommendation         |
+| GET    | `/api/v1/fields/{field_id}/management-plan`       | Weekly irrigation & fertilizer plan      |
+| POST   | `/api/v1/agri-assistant/ask`                      | LLM-powered agronomic Q&A                |
+| POST   | `/api/v1/hemp/prescription`                       | Hemp-specific yield & prescription       |
+
+---
+
+## Tests
 
 ```bash
-pytest
+pytest                          # run all tests
+pytest tests/test_ranking.py    # single file
 ```
 
-## Key Endpoints
+Tests use an in-memory SQLite database. Fixtures are in `tests/conftest.py`.
 
-See full examples in [`docs/API.md`](/c:/Users/VICTUS/Workspace/AgriMind/docs/API.md).
+---
 
-- `POST /api/v1/fields/`
-- `GET /api/v1/fields/`
-- `POST /api/v1/soil-tests/`
-- `GET /api/v1/soil-tests/field/{field_id}`
-- `POST /api/v1/crops/`
-- `GET /api/v1/fields/{field_id}/management-plan`
-- `POST /api/v1/rank-fields/`
-- `GET /api/v1/recommendation/{field_id}/{crop_id}`
-- `POST /api/v1/agri-assistant/ask`
+## Key Dependencies
 
-## Roadmap
-
-### Phase 1. Agronomic scope definition
-
-- define target crops and region
-- standardize field and soil inputs
-- build crop requirement profiles
-
-### Phase 2. Data infrastructure
-
-- production-grade PostgreSQL schema
-- historical field records
-- weather and economics datasets
-
-### Phase 3. Knowledge and rules
-
-- agronomic rule base
-- fertilizer and irrigation guidelines
-- stronger hard-constraint filtering
-
-### Phase 4. Product MVP
-
-- field ranking workflow
-- explainable recommendation output
-- dashboard UI
-
-### Phase 5. Predictive intelligence
-
-- yield prediction
-- risk scoring
-- economic outcome modeling
-
-### Phase 6. AI assistant
-
-- natural-language questions
-- recommendation reasoning
-- retrieval-augmented generation
-
-### Phase 7. Enterprise expansion
-
-- multi-region support
-- sensor and satellite integrations
-- continuous learning pipelines
-
-## Disclaimer
-
-AgriMind recommendations are advisory and should be validated with local agronomists and field experts before operational use.
-
-## Philosophy
-
-> We do not replace farmers. We augment their decisions with intelligence.
+- **FastAPI** — web framework
+- **SQLAlchemy + Alembic** — ORM and migrations
+- **XGBoost** — nested yield prediction pipeline
+- **Pydantic** — schema validation
+- **httpx** — async HTTP client for external API calls
